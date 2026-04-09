@@ -13,8 +13,12 @@ def verify_inclusion(
     state_root: bytes, key: bytes, value: bytes, proof: list[bytes]
 ) -> bool:
     """
-    ``proof`` is an ordered list of **RLP-encoded** nodes from root toward the leaf.
-    ``state_root`` is ``keccak256(RLP(root))`` (``EMPTY_TRIE_ROOT`` if trie empty).
+    ``proof`` is **root-first**: ``proof[0]`` is RLP(root). Further elements are only
+    RLP blobs for children reached via **32-byte hashed** refs. If a child ref is an
+    **embedded** RLP (``len(ref) < 32``), that blob is read from ``ref`` itself — no
+    separate proof entry (matches ``MerklePatriciaTrie.prove``).
+
+    ``state_root`` is ``keccak256(RLP(root_node))`` (``EMPTY_TRIE_ROOT`` if empty).
     """
     if not proof:
         return False
@@ -29,7 +33,7 @@ def verify_inclusion(
     while True:
         try:
             node = rlp.decode(raw)
-        except Exception:
+        except rlp.DecodingError:
             return False
 
         if not isinstance(node, list):
@@ -47,16 +51,20 @@ def verify_inclusion(
                 return False
             rem = rem[pl:]
             ref = node[1]
-            if i >= len(proof):
-                return False
-            nxt = proof[i]
-            i += 1
+            if len(ref) < 32:
+                nxt = ref
+            else:
+                if i >= len(proof):
+                    return False
+                nxt = proof[i]
+                i += 1
             if not ref_matches_embedded(ref, nxt):
                 return False
             raw = nxt
             continue
 
         if len(node) == 17:
+            # pyrlp returns ``bytes`` for byte strings; reject other shapes.
             for slot in node:
                 if not isinstance(slot, bytes):
                     return False
@@ -68,10 +76,13 @@ def verify_inclusion(
             ref = node[n]
             if not ref:
                 return False
-            if i >= len(proof):
-                return False
-            nxt = proof[i]
-            i += 1
+            if len(ref) < 32:
+                nxt = ref
+            else:
+                if i >= len(proof):
+                    return False
+                nxt = proof[i]
+                i += 1
             if not ref_matches_embedded(ref, nxt):
                 return False
             raw = nxt

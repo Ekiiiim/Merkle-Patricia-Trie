@@ -1,4 +1,8 @@
-"""Hexary Merkle Patricia Trie: insert, lookup, delete, state root."""
+"""Hexary Merkle Patricia Trie: insert, lookup, delete, state root.
+
+Structural normalization uses ``_collapse_node`` only on nodes returned along the
+edited path (O(key length)), not a full trie scan after each operation.
+"""
 
 from __future__ import annotations
 
@@ -6,7 +10,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from mpt.nibbles import common_prefix_length, key_to_nibbles
-from mpt.ethereum import encode_node, node_hash
+from mpt.ethereum import embed_ref, encode_node, node_hash
 from mpt.nodes import Branch, Extension, Leaf, Node
 
 
@@ -45,18 +49,24 @@ def _merge_extension_path(prefix: tuple[int, ...], child: Node) -> Node:
     return Extension(prefix, child)
 
 
-def _collapse(node: Optional[Node]) -> Optional[Node]:
+def _collapse_node(node: Optional[Node]) -> Optional[Node]:
+    """
+    Normalize this node only; assume children are already normalized (O(depth), not O(N)).
+
+    Branch children are not recursively collapsed here — recursive insert/delete already
+    returns collapsed subtrees along the updated path.
+    """
     if node is None:
         return None
     if isinstance(node, Leaf):
         return node
     if isinstance(node, Extension):
-        c = _collapse(node.child)
+        c = _collapse_node(node.child)
         if c is None:
             return None
         return _merge_extension_path(node.path, c)
     if isinstance(node, Branch):
-        new_children = [_collapse(c) for c in node.children]
+        new_children = list(node.children)
         nchildren = sum(1 for x in new_children if x is not None)
         if node.value is not None:
             return Branch(new_children, node.value)
@@ -73,13 +83,13 @@ def _collapse(node: Optional[Node]) -> Optional[Node]:
 
 def _insert(node: Optional[Node], key: tuple[int, ...], val: bytes) -> Node:
     if node is None:
-        return Leaf(key, val)
+        return _collapse_node(Leaf(key, val))
     if isinstance(node, Leaf):
-        return _insert_into_leaf(node, key, val)
+        return _collapse_node(_insert_into_leaf(node, key, val))
     if isinstance(node, Extension):
-        return _insert_into_extension(node, key, val)
+        return _collapse_node(_insert_into_extension(node, key, val))
     if isinstance(node, Branch):
-        return _insert_into_branch(node, key, val)
+        return _collapse_node(_insert_into_branch(node, key, val))
     raise TypeError(node)
 
 
@@ -187,55 +197,70 @@ def _delete(node: Optional[Node], key: tuple[int, ...]) -> tuple[Optional[Node],
             return node, False
         if child2 is None:
             return None, True
-        return Extension(node.path, child2), True
+        return _collapse_node(Extension(node.path, child2)), True
     if isinstance(node, Branch):
         if len(key) == 0:
             if node.value is None:
                 return node, False
             new_b = Branch(list(node.children), None)
-            return _collapse(new_b), True
+            return _collapse_node(new_b), True
         idx = key[0]
         ch2, found = _delete(node.children[idx], tuple(key[1:]))
         if not found:
             return node, False
         children = list(node.children)
         children[idx] = ch2
-        return _collapse(Branch(children, node.value)), True
+        return _collapse_node(Branch(children, node.value)), True
     raise TypeError(node)
 
 
 def _prove_walk(
-    node: Optional[Node], key: tuple[int, ...], acc: list[bytes]
+    node: Optional[Node],
+    key: tuple[int, ...],
+    acc: list[bytes],
+    *,
+    embedded: bool = False,
 ) -> Optional[bytes]:
+    """
+    If ``embedded`` is True, this node is carried inside the parent's RLP (<32-byte
+    ref); do not append it again to ``acc`` (Ethereum-style compact proofs).
+    """
     if node is None:
         return None
     if isinstance(node, Leaf):
         if node.path != key:
             return None
-        acc.append(encode_node(node))
+        if not embedded:
+            acc.append(encode_node(node))
         return node.value
     if isinstance(node, Extension):
         pl = len(node.path)
         if len(key) < pl or tuple(key[:pl]) != node.path:
             return None
-        acc.append(encode_node(node))
-        v = _prove_walk(node.child, key[pl:], acc)
-        if v is None:
+        if not embedded:
+            acc.append(encode_node(node))
+        child_emb = len(embed_ref(node.child)) < 32
+        v = _prove_walk(node.child, key[pl:], acc, embedded=child_emb)
+        if v is None and not embedded:
             acc.pop()
         return v
     if isinstance(node, Branch):
-        acc.append(encode_node(node))
+        if not embedded:
+            acc.append(encode_node(node))
         if len(key) == 0:
             if node.value is None:
-                acc.pop()
+                if not embedded:
+                    acc.pop()
                 return None
             return node.value
         ch = node.children[key[0]]
         if ch is None:
-            acc.pop()
+            if not embedded:
+                acc.pop()
             return None
-        v = _prove_walk(ch, key[1:], acc)
-        if v is None:
+        child_emb = len(embed_ref(ch)) < 32
+        v = _prove_walk(ch, key[1:], acc, embedded=child_emb)
+        if v is None and not embedded:
             acc.pop()
         return v
     raise TypeError(node)
@@ -256,7 +281,6 @@ class MerklePatriciaTrie:
     def insert(self, key: bytes, value: bytes) -> None:
         nib = key_to_nibbles(key)
         self.root = _insert(self.root, nib, value)
-        self.root = _collapse(self.root)
 
     def lookup(self, key: bytes) -> Optional[bytes]:
         return _get(self.root, key_to_nibbles(key))
@@ -265,7 +289,7 @@ class MerklePatriciaTrie:
         new_root, found = _delete(self.root, key_to_nibbles(key))
         if not found:
             return False
-        self.root = _collapse(new_root)
+        self.root = new_root
         return True
 
     def prove(self, key: bytes) -> Optional[tuple[bytes, list[bytes]]]:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from mpt import MerklePatriciaTrie, verify_inclusion
+from mpt.constants import keccak256
 
 
 def test_proof_roundtrip_simple() -> None:
@@ -41,6 +42,18 @@ def test_proof_missing_key() -> None:
     t = MerklePatriciaTrie()
     t.insert(b"a", b"1")
     assert t.prove(b"missing") is None
+
+
+def test_proof_single_node_small_trie_still_verifies() -> None:
+    """Small RLP roots still use keccak(root_rlp) as state_root; proof may be one blob."""
+    t = MerklePatriciaTrie()
+    t.insert(b"k", b"v")
+    got = t.prove(b"k")
+    assert got is not None
+    val, proof = got
+    assert len(proof) >= 1
+    assert keccak256(proof[0]) == t.state_root()
+    assert verify_inclusion(t.state_root(), b"k", val, proof)
 
 
 def test_proof_fails_tampered_node() -> None:

@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import Optional
 
-from mpt.nodes import Branch, Extension, Leaf, Node, node_hash
+from mpt.ethereum import node_hash
+from mpt.nodes import Branch, Extension, Leaf, Node
 
 
 def _short_digest(node: Optional[Node]) -> str:

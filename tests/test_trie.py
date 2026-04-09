@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from mpt import MerklePatriciaTrie, node_hash
-from mpt.constants import EMPTY_SUBTREE_HASH, h
+from mpt.constants import EMPTY_TRIE_ROOT, keccak256
 
 
 def test_empty_root() -> None:
     t = MerklePatriciaTrie()
-    assert t.state_root() == EMPTY_SUBTREE_HASH
+    assert t.state_root() == EMPTY_TRIE_ROOT
 
 
 def test_insert_lookup_single() -> None:
@@ -16,7 +16,7 @@ def test_insert_lookup_single() -> None:
     t.insert(b"foo", b"bar")
     assert t.lookup(b"foo") == b"bar"
     assert t.lookup(b"other") is None
-    assert t.state_root() != EMPTY_SUBTREE_HASH
+    assert t.state_root() != EMPTY_TRIE_ROOT
 
 
 def test_insert_updates_value() -> None:
@@ -58,7 +58,7 @@ def test_delete_only_key_empties_trie() -> None:
     t = MerklePatriciaTrie()
     t.insert(b"x", b"y")
     assert t.delete(b"x") is True
-    assert t.state_root() == EMPTY_SUBTREE_HASH
+    assert t.state_root() == EMPTY_TRIE_ROOT
 
 
 def test_root_stable_for_same_map() -> None:
@@ -78,4 +78,4 @@ def test_prove_first_node_hashes_to_root() -> None:
     assert p is not None
     val, nodes = p
     assert val == b"v"
-    assert nodes and h(nodes[0]) == node_hash(t.root)
+    assert nodes and keccak256(nodes[0]) == node_hash(t.root)

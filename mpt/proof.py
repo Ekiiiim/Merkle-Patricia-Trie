@@ -1,98 +1,80 @@
-"""Merkle Patricia Trie inclusion proof verification."""
+"""Ethereum-style MPT inclusion proof verification (RLP nodes + embed ref rule)."""
 
 from __future__ import annotations
 
-from mpt.constants import EMPTY_SUBTREE_HASH, HASH_LEN, h
+import rlp
+
+from mpt.constants import keccak256
+from mpt.ethereum import decode_hex_prefix, ref_matches_embedded
 from mpt.nibbles import key_to_nibbles
-from mpt.nodes import unpack_nibbles
 
 
 def verify_inclusion(
     state_root: bytes, key: bytes, value: bytes, proof: list[bytes]
 ) -> bool:
     """
-    Check that `proof` witnesses `key -> value` under `state_root`.
-    Proof nodes are canonical wire encodings (same as `encode_node`).
+    ``proof`` is an ordered list of **RLP-encoded** nodes from root toward the leaf.
+    ``state_root`` is ``keccak256(RLP(root))`` (``EMPTY_TRIE_ROOT`` if trie empty).
     """
     if not proof:
         return False
-    if h(proof[0]) != state_root:
+    if keccak256(proof[0]) != state_root:
         return False
+
     rem = key_to_nibbles(key)
     i = 0
-    body = proof[i]
+    raw = proof[i]
     i += 1
 
     while True:
-        tag = body[0:1]
-        if tag == b"L":
-            nibbles, pos = unpack_nibbles(body, 1)
-            if pos + 4 > len(body):
-                return False
-            vl = int.from_bytes(body[pos : pos + 4], "big")
-            pos += 4
-            if pos + vl != len(body):
-                return False
-            got = body[pos : pos + vl]
-            return nibbles == rem and got == value
+        try:
+            node = rlp.decode(raw)
+        except Exception:
+            return False
 
-        if tag == b"E":
-            nibbles, pos = unpack_nibbles(body, 1)
-            if pos + HASH_LEN != len(body):
+        if not isinstance(node, list):
+            return False
+
+        if len(node) == 2:
+            if not isinstance(node[0], bytes) or not isinstance(node[1], bytes):
                 return False
-            child_hash = body[pos : pos + HASH_LEN]
+            nibbles, is_leaf = decode_hex_prefix(node[0])
+            if is_leaf:
+                return nibbles == rem and node[1] == value
+
             pl = len(nibbles)
             if len(rem) < pl or tuple(rem[:pl]) != nibbles:
                 return False
             rem = rem[pl:]
+            ref = node[1]
             if i >= len(proof):
                 return False
-            if h(proof[i]) != child_hash:
-                return False
-            body = proof[i]
+            nxt = proof[i]
             i += 1
+            if not ref_matches_embedded(ref, nxt):
+                return False
+            raw = nxt
             continue
 
-        if tag == b"B":
-            pos = 1
-            slots: list[bytes] = []
-            for _ in range(16):
-                if pos + HASH_LEN > len(body):
+        if len(node) == 17:
+            for slot in node:
+                if not isinstance(slot, bytes):
                     return False
-                slots.append(body[pos : pos + HASH_LEN])
-                pos += HASH_LEN
-            if pos >= len(body):
-                return False
-            flag = body[pos]
-            pos += 1
-            term_val: bytes | None
-            if flag == 0:
-                term_val = None
-            elif flag == 1:
-                if pos + 4 > len(body):
-                    return False
-                vl = int.from_bytes(body[pos : pos + 4], "big")
-                pos += 4
-                if pos + vl != len(body):
-                    return False
-                term_val = body[pos : pos + vl]
-            else:
-                return False
-
             if len(rem) == 0:
-                return term_val == value
+                return node[16] == value
 
             n = rem[0]
             rem = rem[1:]
-            need = slots[n]
-            if need == EMPTY_SUBTREE_HASH:
+            ref = node[n]
+            if not ref:
                 return False
             if i >= len(proof):
                 return False
-            if h(proof[i]) != need:
-                return False
-            body = proof[i]
+            nxt = proof[i]
             i += 1
+            if not ref_matches_embedded(ref, nxt):
+                return False
+            raw = nxt
             continue
 
         return False

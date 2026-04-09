@@ -1,15 +1,21 @@
-"""Cryptographic constants (SHA-256; Ethereum mainnet uses Keccak-256)."""
+"""Keccak-256 and Ethereum empty trie root (execution-layer MPT)."""
 
 from __future__ import annotations
 
-import hashlib
+import rlp
+from Crypto.Hash import keccak
 
 HASH_LEN = 32
 
 
-def h(data: bytes) -> bytes:
-    return hashlib.sha256(data).digest()
+def keccak256(data: bytes) -> bytes:
+    h = keccak.new(digest_bits=256)
+    h.update(data)
+    return h.digest()
 
 
-# Hash of an empty subtrie (no node). Used for empty branch slots and proof verification.
-EMPTY_SUBTREE_HASH: bytes = h(b"\x00mpt:empty\x00")
+# Ethereum: root of empty trie = keccak256(RLP('')) where RLP('') = 0x80
+EMPTY_TRIE_ROOT: bytes = keccak256(rlp.encode(b""))
+
+# Back-compat alias used in older code paths
+h = keccak256

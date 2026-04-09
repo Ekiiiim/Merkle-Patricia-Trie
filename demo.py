@@ -2,6 +2,8 @@
 """
 Run from the repo root: python demo.py
 
+Uses Ethereum-style RLP + Keccak-256 (see mpt/ethereum.py for caveats).
+
 Prints state roots, lookups, proof verification, and writes Graphviz DOT:
   - demo_steps.dot — one subgraph cluster per step (easy to verify evolution)
   - demo_trie.dot  — final trie only

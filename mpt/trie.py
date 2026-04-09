@@ -6,7 +6,8 @@ from dataclasses import dataclass
 from typing import Optional
 
 from mpt.nibbles import common_prefix_length, key_to_nibbles
-from mpt.nodes import Branch, Extension, Leaf, Node, encode_node, node_hash
+from mpt.ethereum import encode_node, node_hash
+from mpt.nodes import Branch, Extension, Leaf, Node
 
 
 def snapshot_node(node: Optional[Node]) -> Optional[Node]:

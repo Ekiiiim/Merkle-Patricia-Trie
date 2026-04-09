@@ -4,16 +4,27 @@ from __future__ import annotations
 
 from typing import Optional
 
-from mpt.ethereum import node_hash
+from mpt.ethereum import encode_node, node_hash
 from mpt.nodes import Branch, Extension, Leaf, Node
-
-
-def _short_digest(node: Optional[Node]) -> str:
-    return node_hash(node).hex()[:10]
 
 
 def _esc(s: str) -> str:
     return s.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _wrap_hex(hex_str: str, width: int = 48) -> str:
+    """Break long hex into lines for Graphviz labels (use \\n in DOT)."""
+    if not hex_str:
+        return ""
+    return "\\n".join(hex_str[i : i + width] for i in range(0, len(hex_str), width))
+
+
+def _hash_label(node: Optional[Node]) -> str:
+    return _wrap_hex(node_hash(node).hex(), width=32)
+
+
+def _rlp_label(node: Node) -> str:
+    return _wrap_hex(encode_node(node).hex(), width=48)
 
 
 def _emit_trie(
@@ -36,18 +47,27 @@ def _emit_trie(
         if isinstance(node, Leaf):
             nid = new_id()
             path_hex = bytes(node.path).hex()
-            val_preview = node.value[:16].hex() + ("…" if len(node.value) > 16 else "")
+            val_hex = node.value.hex()
             lines.append(
-                f'{indent}{nid} [shape=box,style=filled,fillcolor="#e8f5e9",'
-                f'label="Leaf\\npath={path_hex}\\nval={val_preview}\\n#{_short_digest(node)}"];'
+                f'{indent}{nid} [shape=box,style=filled,fillcolor="#e8f5e9",fontsize=9,'
+                f'label="Leaf\\n'
+                f"path_nibbles_hex={path_hex}\\n"
+                f"value_hex={val_hex}\\n"
+                f"node_hash_keccak256=\\n{_hash_label(node)}\\n"
+                f"rlp_hex=\\n{_rlp_label(node)}"
+                f'"];'
             )
             return nid
         if isinstance(node, Extension):
             nid = new_id()
             path_hex = bytes(node.path).hex()
             lines.append(
-                f'{indent}{nid} [shape=ellipse,style=filled,fillcolor="#e3f2fd",'
-                f'label="Ext\\n{path_hex}\\n#{_short_digest(node)}"];'
+                f'{indent}{nid} [shape=ellipse,style=filled,fillcolor="#e3f2fd",fontsize=9,'
+                f'label="Extension\\n'
+                f"path_nibbles_hex={path_hex}\\n"
+                f"node_hash_keccak256=\\n{_hash_label(node)}\\n"
+                f"rlp_hex=\\n{_rlp_label(node)}"
+                f'"];'
             )
             cid = emit(node.child)
             if cid is not None:
@@ -56,8 +76,11 @@ def _emit_trie(
         if isinstance(node, Branch):
             nid = new_id()
             lines.append(
-                f'{indent}{nid} [shape=record,style=filled,fillcolor="#fff3e0",'
-                f'label="Branch|#{_short_digest(node)}"];'
+                f'{indent}{nid} [shape=box,style=filled,fillcolor="#fff3e0",fontsize=9,'
+                f'label="Branch\\n'
+                f"node_hash_keccak256=\\n{_hash_label(node)}\\n"
+                f"rlp_hex=\\n{_rlp_label(node)}"
+                f'"];'
             )
             for i, ch in enumerate(node.children):
                 if ch is None:
@@ -66,10 +89,11 @@ def _emit_trie(
                 if cid is not None:
                     lines.append(f'{indent}{nid} -> {cid} [label="{i:x}"];')
             if node.value is not None:
-                vv = node.value[:12].hex() + ("…" if len(node.value) > 12 else "")
+                vv = node.value.hex()
                 term = new_id()
                 lines.append(
-                    f'{indent}{term} [shape=note,fillcolor="#fce4ec",label="value={vv}"];'
+                    f'{indent}{term} [shape=note,fillcolor="#fce4ec",fontsize=9,'
+                    f'label="branch_terminal_value_hex={vv}"];'
                 )
                 lines.append(f'{indent}{nid} -> {term} [style=dashed,label="$"];')
             return nid
@@ -85,6 +109,7 @@ def trie_to_dot(root: Optional[Node], *, title: str = "MPT") -> str:
     lines: list[str] = [
         "digraph MPT {",
         '  rankdir=TB;',
+        '  graph [fontname="monospace"];',
         '  node [fontname="monospace"];',
         f'  label="{_esc(title)}";',
         "  labelloc=t;",
@@ -107,11 +132,11 @@ def evolution_to_dot(
     """
     lines: list[str] = [
         "digraph MPT_evolution {",
-        '  graph [fontname="monospace", fontsize=11];',
+        '  graph [fontname="monospace", fontsize=10];',
         '  node [fontname="monospace"];',
         '  rankdir=LR;',
-        '  newrank=true;',
-        '  compound=true;',
+        "  newrank=true;",
+        "  compound=true;",
         f'  label="{_esc(title)}";',
         "  labelloc=t;",
     ]
@@ -120,11 +145,11 @@ def evolution_to_dot(
         label = f"{desc}\\nstate_root = {root_hex}"
         lines.append(f"  subgraph {cluster} {{")
         lines.append(f'    label="{_esc(label)}";')
-        lines.append('    labelloc=t;')
+        lines.append("    labelloc=t;")
         lines.append('    style="rounded,filled";')
         lines.append('    fillcolor="#eceff1";')
         lines.append('    color="#546e7a";')
-        lines.append('    margin=16;')
+        lines.append("    margin=16;")
         _emit_trie(lines, root, id_prefix=f"s{i}", indent="    ")
         lines.append("  }")
     lines.append("}")
@@ -149,15 +174,20 @@ def try_matplotlib_show(root: Optional[Node]) -> None:
             return
         if isinstance(node, Leaf):
             G.add_node(name)
-            labels[name] = f"Leaf {bytes(node.path).hex()}"
+            labels[name] = (
+                f"L path={bytes(node.path).hex()}\n"
+                f"v={node.value.hex()}\nh={node_hash(node).hex()}"
+            )
         elif isinstance(node, Extension):
             G.add_node(name)
-            labels[name] = f"Ext {bytes(node.path).hex()}"
+            labels[name] = (
+                f"E path={bytes(node.path).hex()}\nh={node_hash(node).hex()}"
+            )
             walk(node.child, f"{name}.c")
             G.add_edge(name, f"{name}.c")
         elif isinstance(node, Branch):
             G.add_node(name)
-            labels[name] = "Br"
+            labels[name] = f"Br h={node_hash(node).hex()}"
             for i, ch in enumerate(node.children):
                 if ch is None:
                     continue
@@ -167,7 +197,7 @@ def try_matplotlib_show(root: Optional[Node]) -> None:
 
     walk(root, "r")
     pos = nx.spring_layout(G, seed=0)
-    nx.draw(G, pos, with_labels=True, labels=labels, node_size=800, font_size=7)
+    nx.draw(G, pos, with_labels=True, labels=labels, node_size=1200, font_size=6)
     plt.axis("off")
     plt.tight_layout()
     plt.show()

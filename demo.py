@@ -62,13 +62,15 @@ def main() -> None:
     record("2 — insert(bob → 200)")
     t.insert(b"alma", b"300")
     record("3 — insert(alma → 300)")
+    t.insert(b"alick", b"100")
+    record("4 — insert(alick → 100)")
 
-    print("After insert(alice→100, bob→200, alma→300):")
+    print("After insert(alice→100, bob→200, alma→300, alick→100):")
     print(f"  state_root = {t.state_root().hex()}")
     print(f"  lookup(alice) = {t.lookup(b'alice')!r}")
     print(f"  lookup(bob)   = {t.lookup(b'bob')!r}")
     print(f"  lookup(alma)  = {t.lookup(b'alma')!r}")
-    print(f"  lookup(eve)   = {t.lookup(b'eve')!r}\n")
+    print(f"  lookup(alick) = {t.lookup(b'alick')!r}")
 
     key, val = b"alice", t.lookup(b"alice")
     assert val is not None

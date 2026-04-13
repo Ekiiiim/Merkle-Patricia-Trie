@@ -19,6 +19,7 @@ if str(_ROOT) not in sys.path:
 
 from mpt import MerklePatriciaTrie, trie_to_dot, verify_inclusion, verify_inclusion_trace
 from mpt.persistent import PersistentMPT
+from mpt.store import load_trie_from_head
 
 app = FastAPI(title="MPT demo API", version="0.1.0")
 
@@ -46,6 +47,11 @@ class ReplayRequest(BaseModel):
 class VerifyDemoRequest(BaseModel):
     operations: list[TrieOp] = Field(default_factory=list)
     prove_key: str = Field(..., description="UTF-8 key to prove after replay")
+
+
+class LookupRequest(BaseModel):
+    operations: list[TrieOp] = Field(default_factory=list)
+    key: str = Field(..., description="UTF-8 key to look up")
 
 
 class DbLoadRequest(BaseModel):
@@ -85,13 +91,22 @@ def _ops_is_prefix(prefix: list[TrieOp], full: list[TrieOp]) -> bool:
     return True
 
 
+def _insert_key_value_bytes(o: TrieOp) -> tuple[bytes, bytes]:
+    """UTF-8 key/value bytes for an insert op; rejects null/missing ``value``."""
+    if o.value is None:
+        raise HTTPException(
+            status_code=400,
+            detail="insert requires a non-null value",
+        )
+    return o.key.encode("utf-8"), o.value.encode("utf-8")
+
+
 def _apply_ops(ops: list[TrieOp]) -> MerklePatriciaTrie:
     t = MerklePatriciaTrie()
     for o in ops:
         if o.op == "insert":
-            if o.value is None:
-                raise HTTPException(status_code=400, detail="insert requires value")
-            t.insert(o.key.encode("utf-8"), o.value.encode("utf-8"))
+            kb, vb = _insert_key_value_bytes(o)
+            t.insert(kb, vb)
         else:
             if not t.delete(o.key.encode("utf-8")):
                 raise HTTPException(
@@ -99,6 +114,60 @@ def _apply_ops(ops: list[TrieOp]) -> MerklePatriciaTrie:
                     detail=f"delete: key not found ({o.key!r})",
                 )
     return t
+
+
+def _lookup_response(
+    *,
+    trie: MerklePatriciaTrie,
+    key_b: bytes,
+    active_db: str | None,
+) -> dict:
+    val = trie.lookup(key_b)
+    return {
+        "found": val is not None,
+        "key": key_b.decode("utf-8", errors="replace"),
+        "value_utf8": val.decode("utf-8", errors="replace") if val is not None else None,
+        "value_hex": val.hex() if val is not None else None,
+        "state_root_hex": trie.state_root().hex(),
+        "active_db": active_db,
+    }
+
+
+@app.post("/api/lookup")
+def lookup_value(body: LookupRequest) -> dict:
+    """Return the value for a key after applying ``operations`` (read-only; does not commit)."""
+    key_b = body.key.encode("utf-8")
+    with _state_lock:
+        db_name = _active_db_name
+        ops_prefix = list(_active_ops)
+
+    if db_name is None:
+        t = _apply_ops(body.operations)
+        return _lookup_response(trie=t, key_b=key_b, active_db=None)
+
+    if not _ops_is_prefix(ops_prefix, body.operations):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "DB mode expects the submitted operations to extend the current history. "
+                "Use Reset (or unload/reload DB) before sending a different history."
+            ),
+        )
+    delta = body.operations[len(ops_prefix) :]
+    db_path = _db_path_for(db_name)
+    with PersistentMPT(str(db_path), create_if_missing=False) as pmpt:
+        t = load_trie_from_head(pmpt._kv)
+        for o in delta:
+            if o.op == "insert":
+                kb, vb = _insert_key_value_bytes(o)
+                t.insert(kb, vb)
+            else:
+                if not t.delete(o.key.encode("utf-8")):
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"delete: key not found ({o.key!r})",
+                    )
+        return _lookup_response(trie=t, key_b=key_b, active_db=db_name)
 
 
 @app.post("/api/replay")
@@ -122,9 +191,8 @@ def replay(body: ReplayRequest) -> dict:
             ]
             for idx, o in enumerate(body.operations):
                 if o.op == "insert":
-                    if o.value is None:
-                        raise HTTPException(status_code=400, detail="insert requires value")
-                    t.insert(o.key.encode("utf-8"), o.value.encode("utf-8"))
+                    kb, vb = _insert_key_value_bytes(o)
+                    t.insert(kb, vb)
                     label = f"{idx + 1} — insert({o.key} → {o.value})"
                 else:
                     if not t.delete(o.key.encode("utf-8")):
@@ -163,9 +231,8 @@ def replay(body: ReplayRequest) -> dict:
     with PersistentMPT(str(db_path), create_if_missing=False) as pmpt:
         for o in delta:
             if o.op == "insert":
-                if o.value is None:
-                    raise HTTPException(status_code=400, detail="insert requires value")
-                pmpt.insert(o.key.encode("utf-8"), o.value.encode("utf-8"))
+                kb, vb = _insert_key_value_bytes(o)
+                pmpt.insert(kb, vb)
                 label = f"{len(_active_steps)} — insert({o.key} → {o.value})"
             else:
                 if not pmpt.delete(o.key.encode("utf-8")):
@@ -246,9 +313,8 @@ def verify_demo(body: VerifyDemoRequest) -> dict:
     with PersistentMPT(str(db_path), create_if_missing=False) as pmpt:
         for o in delta:
             if o.op == "insert":
-                if o.value is None:
-                    raise HTTPException(status_code=400, detail="insert requires value")
-                pmpt.insert(o.key.encode("utf-8"), o.value.encode("utf-8"))
+                kb, vb = _insert_key_value_bytes(o)
+                pmpt.insert(kb, vb)
                 label = f"{steps_len} — insert({o.key} → {o.value})"
             else:
                 if not pmpt.delete(o.key.encode("utf-8")):

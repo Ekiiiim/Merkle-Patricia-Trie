@@ -17,8 +17,8 @@ def test_to_dot_contains_graph() -> None:
     assert "Leaf" in dot
     full_h = node_hash(t.root).hex()
     assert full_h[:32] in dot and full_h[32:] in dot
-    assert "rlp_hex=" in dot
-    assert "value_hex=" in dot
+    assert "value=" in dot
+    assert "path_nibbles_hex=" in dot
 
 
 def test_evolution_to_dot_subgraphs() -> None:

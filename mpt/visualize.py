@@ -11,12 +11,28 @@ from mpt.nodes import Branch, Extension, Leaf, Node
 def _esc(s: str) -> str:
     return s.replace("\\", "\\\\").replace('"', '\\"')
 
+def _esc_label_value(s: str) -> str:
+    """
+    Escape a value that will be embedded inside a DOT label.
+
+    We want to preserve Graphviz newline escapes (``\n``) that we insert for wrapping,
+    so we escape first, then re-enable ``\n``.
+    """
+    out = _esc(s)
+    return out.replace("\\\\n", "\\n")
+
 
 def _wrap_hex(hex_str: str, width: int = 48) -> str:
     """Break long hex into lines for Graphviz labels (use \\n in DOT)."""
     if not hex_str:
         return ""
     return "\\n".join(hex_str[i : i + width] for i in range(0, len(hex_str), width))
+
+def _wrap_text(s: str, width: int = 32) -> str:
+    """Wrap plain text for DOT labels using Graphviz ``\n`` escapes."""
+    if not s or len(s) <= width:
+        return s
+    return "\\n".join(s[i : i + width] for i in range(0, len(s), width))
 
 
 def _hash_label(node: Optional[Node]) -> str:
@@ -25,6 +41,34 @@ def _hash_label(node: Optional[Node]) -> str:
 
 def _rlp_label(node: Node) -> str:
     return _wrap_hex(encode_node(node).hex(), width=48)
+
+def _is_readable_ascii(s: str) -> bool:
+    # Prefer a conservative "printable" subset for DOT labels.
+    if not s:
+        return False
+    return all(ch.isprintable() and ch not in {"\n", "\r", "\t"} for ch in s)
+
+
+def _bytes_readable(b: bytes, *, max_len: int | None = None) -> str:
+    """
+    Render bytes as a readable string when possible, else as hex.
+
+    - If UTF-8 decodes to mostly-printable text, show it (quoted).
+    - Otherwise show hex.
+    """
+    try:
+        s = b.decode("utf-8")
+    except UnicodeDecodeError:
+        return f"0x{b.hex()}"
+    if not _is_readable_ascii(s):
+        return f"0x{b.hex()}"
+    if max_len is not None and len(s) > max_len:
+        s = s[: max_len - 1] + "…"
+    return repr(s)
+
+def _nibbles_hex(nibs: tuple[int, ...]) -> str:
+    """Render nibble tuple as hex string (length can be odd)."""
+    return "".join(format(n & 0xF, "x") for n in nibs)
 
 
 def _emit_trie(
@@ -41,26 +85,30 @@ def _emit_trie(
         counter[0] += 1
         return f"{id_prefix}_{counter[0]}"
 
-    def emit(node: Optional[Node]) -> Optional[str]:
+    def emit(node: Optional[Node], prefix: tuple[int, ...]) -> Optional[str]:
         if node is None:
             return None
         if isinstance(node, Leaf):
             nid = new_id()
-            path_hex = bytes(node.path).hex()
-            val_hex = node.value.hex()
+            full_path = prefix + node.path
+            # For visualization, prefer wrapping over truncation.
+            path_disp = _esc_label_value(
+                _wrap_text("0x" + _nibbles_hex(full_path), width=24)
+            )
+            val_disp = _esc_label_value(_wrap_text(_bytes_readable(node.value, max_len=None), width=24))
             lines.append(
                 f'{indent}{nid} [shape=box,style=filled,fillcolor="#e8f5e9",fontsize=9,'
                 f'label="Leaf\\n'
-                f"path_nibbles_hex={path_hex}\\n"
-                f"value_hex={val_hex}\\n"
-                f"node_hash_keccak256=\\n{_hash_label(node)}\\n"
-                f"rlp_hex=\\n{_rlp_label(node)}"
+                f"path_nibbles_hex={path_disp}\\n"
+                f"value={val_disp}\\n"
+                f"node_hash_keccak256=\\n{_hash_label(node)}"
                 f'"];'
             )
             return nid
         if isinstance(node, Extension):
             nid = new_id()
-            path_hex = bytes(node.path).hex()
+            full_path = prefix + node.path
+            path_hex = _nibbles_hex(full_path)
             lines.append(
                 f'{indent}{nid} [shape=ellipse,style=filled,fillcolor="#e3f2fd",fontsize=9,'
                 f'label="Extension\\n'
@@ -69,7 +117,7 @@ def _emit_trie(
                 f"rlp_hex=\\n{_rlp_label(node)}"
                 f'"];'
             )
-            cid = emit(node.child)
+            cid = emit(node.child, full_path)
             if cid is not None:
                 lines.append(f"{indent}{nid} -> {cid};")
             return nid
@@ -85,7 +133,7 @@ def _emit_trie(
             for i, ch in enumerate(node.children):
                 if ch is None:
                     continue
-                cid = emit(ch)
+                cid = emit(ch, prefix + (i,))
                 if cid is not None:
                     lines.append(f'{indent}{nid} -> {cid} [label="{i:x}"];')
             if node.value is not None:
@@ -102,7 +150,7 @@ def _emit_trie(
     if root is None:
         lines.append(f'{indent}{id_prefix}_empty [shape=plaintext,label="∅ empty trie"];')
     else:
-        emit(root)
+        emit(root, ())
 
 
 def trie_to_dot(root: Optional[Node], *, title: str = "MPT") -> str:
@@ -175,8 +223,8 @@ def try_matplotlib_show(root: Optional[Node]) -> None:
         if isinstance(node, Leaf):
             G.add_node(name)
             labels[name] = (
-                f"L path={bytes(node.path).hex()}\n"
-                f"v={node.value.hex()}\nh={node_hash(node).hex()}"
+                f"L path=0x{_nibbles_hex(node.path)}\n"
+                f"v={_bytes_readable(node.value)}\nh={node_hash(node).hex()}"
             )
         elif isinstance(node, Extension):
             G.add_node(name)

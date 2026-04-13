@@ -22,6 +22,10 @@
   let apiError = $state<string | null>(null)
   let busy = $state(false)
 
+  let dbs = $state<string[]>([])
+  let selectedDb = $state<string>('')
+  let activeDb = $state<string | null>(null)
+
   let keyInput = $state('alice')
   let valueInput = $state('100')
   let proveKey = $state('alice')
@@ -43,6 +47,18 @@
   let triePlayTimer: ReturnType<typeof setInterval> | null = null
   let verifyPlayTimer: ReturnType<typeof setInterval> | null = null
 
+  async function fetchJson<T>(url: string, init?: RequestInit, timeoutMs = 10_000): Promise<{ res: Response; data: T }> {
+    const ctrl = new AbortController()
+    const t = setTimeout(() => ctrl.abort(), timeoutMs)
+    try {
+      const res = await fetch(url, { ...init, signal: ctrl.signal })
+      const data = (await res.json().catch(() => ({}))) as T
+      return { res, data }
+    } finally {
+      clearTimeout(t)
+    }
+  }
+
   onMount(() => {
     void (async () => {
       try {
@@ -52,6 +68,8 @@
         loadError = e instanceof Error ? e.message : String(e)
       }
     })()
+
+    void refreshDbList()
 
     return () => {
       if (triePlayTimer) clearInterval(triePlayTimer)
@@ -89,20 +107,100 @@
     }
   }
 
-  async function replayToServer(ops: TrieOp[]) {
+  async function refreshDbList() {
+    try {
+      const { res, data } = await fetchJson<{ dbs?: string[]; active_db?: string | null }>('/api/db/list', undefined, 5000)
+      if (res.ok) {
+        dbs = data.dbs ?? []
+        activeDb = typeof data.active_db === 'string' ? data.active_db : null
+        if (!selectedDb) selectedDb = activeDb ?? (dbs[0] ?? '')
+      }
+    } catch {
+      // ignore; db selector is optional for demo
+    }
+  }
+
+  async function loadDb(name: string) {
     apiError = null
+    verifyResult = null
+    stopVerifyPlay()
+    stopTriePlay()
     busy = true
     try {
-      const res = await fetch('/api/replay', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ operations: ops }),
-      })
-      const data = (await res.json().catch(() => ({}))) as { detail?: string; steps?: Step[] }
+      const { res, data } = await fetchJson<{ detail?: string; active_db?: string | null; steps?: Step[] }>(
+        '/api/db/load',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ db_name: name }),
+        },
+        20_000,
+      )
       if (!res.ok) {
         apiError = typeof data.detail === 'string' ? data.detail : res.statusText
         return false
       }
+      activeDb = typeof data.active_db === 'string' ? data.active_db : null
+      operations = []
+      steps = data.steps ?? []
+      stepIndex = Math.max(0, steps.length - 1)
+      await refreshDbList()
+      return true
+    } finally {
+      busy = false
+    }
+  }
+
+  async function unloadDb() {
+    apiError = null
+    verifyResult = null
+    stopVerifyPlay()
+    stopTriePlay()
+    busy = true
+    try {
+      const { res, data } = await fetchJson<{ detail?: string; active_db?: string | null }>(
+        '/api/db/unload',
+        { method: 'POST' },
+        10_000,
+      )
+      if (!res.ok) {
+        apiError = typeof data.detail === 'string' ? data.detail : res.statusText
+        return false
+      }
+      activeDb = null
+      await refreshDbList()
+      // Back to stateless mode: clear UI state.
+      operations = []
+      steps = []
+      stepIndex = 0
+      return true
+    } finally {
+      busy = false
+    }
+  }
+
+  async function replayToServer(ops: TrieOp[]) {
+    apiError = null
+    busy = true
+    try {
+      const { res, data } = await fetchJson<{
+        detail?: string
+        steps?: Step[]
+        active_db?: string | null
+      }>(
+        '/api/replay',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ operations: ops }),
+        },
+        20_000,
+      )
+      if (!res.ok) {
+        apiError = typeof data.detail === 'string' ? data.detail : res.statusText
+        return false
+      }
+      activeDb = typeof data.active_db === 'string' ? data.active_db : null
       operations = ops
       steps = data.steps ?? []
       stepIndex = Math.max(0, steps.length - 1)
@@ -140,7 +238,11 @@
   async function resetAll() {
     verifyResult = null
     stopVerifyPlay()
-    await replayToServer([])
+    if (activeDb) {
+      await loadDb(activeDb)
+    } else {
+      await replayToServer([])
+    }
   }
 
   function toggleTriePlay() {
@@ -165,15 +267,18 @@
     stopVerifyPlay()
     busy = true
     try {
-      const res = await fetch('/api/verify-demo', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          operations,
-          prove_key: proveKey.trim() || 'alice',
-        }),
-      })
-      const data = await res.json().catch(() => ({}))
+      const { res, data } = await fetchJson<any>(
+        '/api/verify-demo',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            operations,
+            prove_key: proveKey.trim() || 'alice',
+          }),
+        },
+        20_000,
+      )
       if (!res.ok) {
         apiError = typeof (data as { detail?: string }).detail === 'string'
           ? (data as { detail: string }).detail
@@ -236,6 +341,51 @@
       <p class="mt-1 text-sm text-[var(--muted)]">
         Keys and values are UTF-8 strings (same style as <code>demo.py</code>).
       </p>
+
+      <h3 class="mt-4 text-sm font-semibold">Database (optional)</h3>
+      <p class="mt-1 text-sm text-[var(--muted)]">
+        If you load a DB, all subsequent operations are committed to it. Otherwise, the demo replays from an empty
+        in-memory trie.
+      </p>
+
+      <div class="mt-2 flex flex-wrap items-end gap-2">
+        <div class="flex flex-col gap-1">
+          <label class="block text-xs font-medium text-[var(--muted)]" for="dbsel">DB</label>
+          <select
+            id="dbsel"
+            class="w-full max-w-64 rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
+            bind:value={selectedDb}
+            disabled={busy || dbs.length === 0}
+          >
+            {#each dbs as name}
+              <option value={name}>{name}</option>
+            {/each}
+          </select>
+        </div>
+
+        <button
+          type="button"
+          class="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm hover:border-[var(--accent)] hover:bg-[var(--accent-dim)] disabled:cursor-not-allowed disabled:opacity-50"
+          onclick={() => selectedDb && loadDb(selectedDb)}
+          disabled={busy || !!loadError || !selectedDb}
+        >
+          Load DB
+        </button>
+        <button
+          type="button"
+          class="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm hover:border-[var(--accent)] hover:bg-[var(--accent-dim)] disabled:cursor-not-allowed disabled:opacity-50"
+          onclick={unloadDb}
+          disabled={busy || !!loadError || !activeDb}
+        >
+          Unload
+        </button>
+      </div>
+
+      {#if activeDb}
+        <p class="mt-2 text-xs text-[var(--muted)]">
+          Active DB: <code>{activeDb}</code>
+        </p>
+      {/if}
 
       <div class="mt-3">
         <label class="block text-xs font-medium text-[var(--muted)]" for="key">Key</label>

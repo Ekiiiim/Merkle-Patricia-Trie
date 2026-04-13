@@ -245,6 +245,11 @@
     }
   }
 
+  function goToTrieStep(idx: number) {
+    stopTriePlay()
+    stepIndex = Math.max(0, Math.min(idx, steps.length - 1))
+  }
+
   function toggleTriePlay() {
     if (steps.length < 2) return
     stopVerifyPlay()
@@ -308,18 +313,14 @@
     }, 1200)
   }
 
-  function opLabel(o: TrieOp, i: number) {
-    if (o.op === 'insert') return `${i + 1}. insert(${o.key} → ${o.value ?? ''})`
-    return `${i + 1}. delete(${o.key})`
-  }
 </script>
 
 <div class="mx-auto max-w-6xl px-6 py-5 pb-12">
   <header>
     <h1 class="text-2xl font-semibold tracking-tight">Merkle Patricia Trie</h1>
     <p class="mt-1 max-w-3xl text-sm text-[var(--muted)]">
-      Ethereum-style RLP + Keccak-256. Edit the trie below; scrub through each applied operation, then run a
-      proof verification walkthrough.
+      Ethereum-style RLP + Keccak-256. Click a history step to view the trie at that point, then run a proof
+      verification walkthrough.
     </p>
   </header>
 
@@ -444,44 +445,40 @@
       </div>
 
       <h3 class="mt-4 text-sm font-semibold">History</h3>
-      {#if operations.length === 0}
-        <p class="mt-1 text-sm text-[var(--muted)]">No operations yet — trie is empty.</p>
+      <p class="mt-1 text-xs text-[var(--muted)]">Click a step to show that trie state in the graph.</p>
+      {#if steps.length === 0}
+        <p class="mt-2 text-sm text-[var(--muted)]">No steps yet — run an operation or load a DB.</p>
       {:else}
-        <ol class="mt-2 list-decimal pl-5 text-sm text-[var(--muted)]">
-          {#each operations as o, i}
-            <li>{opLabel(o, i)}</li>
+        <ul class="mt-2 flex max-h-[min(40vh,22rem)] flex-col gap-1 overflow-y-auto pr-1">
+          {#each steps as step, idx}
+            <li class="list-none">
+              <button
+                type="button"
+                class="w-full max-w-full rounded-lg border px-3 py-2 text-left text-sm transition-colors disabled:opacity-50 {stepIndex === idx
+                  ? 'border-[var(--accent)] bg-[var(--accent-dim)] text-[var(--text)]'
+                  : 'border-[var(--border)] bg-[var(--surface)] text-[var(--muted)] hover:border-[var(--accent)] hover:bg-[var(--accent-dim)]'}"
+                onclick={() => goToTrieStep(idx)}
+                disabled={busy || !!loadError}
+                aria-pressed={stepIndex === idx}
+              >
+                <span class="block font-medium text-[var(--text)]">{step.label}</span>
+                <span class="mt-0.5 block font-mono text-[10px] break-all text-[var(--muted)]">
+                  state_root: {step.state_root_hex}
+                </span>
+              </button>
+            </li>
           {/each}
-        </ol>
-      {/if}
-
-      <h3 class="mt-4 text-sm font-semibold">Trie step</h3>
-      {#if steps.length}
-        <p class="mt-1 font-mono text-xs break-all text-[var(--muted)]">{steps[stepIndex]?.label}</p>
-        <p class="mt-1 font-mono text-xs break-all text-[var(--accent)]">
-          state_root: {steps[stepIndex]?.state_root_hex}
-        </p>
-        <div class="mt-2 flex flex-col gap-2">
-          <input
-            class="w-full max-w-[420px]"
-            type="range"
-            min="0"
-            max={steps.length - 1}
-            bind:value={stepIndex}
-            disabled={steps.length < 2}
-          />
-          <div class="flex flex-wrap gap-2">
-            <button
-              type="button"
-              class="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm hover:border-[var(--accent)] hover:bg-[var(--accent-dim)] disabled:cursor-not-allowed disabled:opacity-50"
-              onclick={toggleTriePlay}
-              disabled={steps.length < 2 || !!loadError}
-            >
-              {triePlaying ? 'Pause' : 'Play steps'}
-            </button>
-          </div>
+        </ul>
+        <div class="mt-2 flex flex-wrap gap-2">
+          <button
+            type="button"
+            class="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm hover:border-[var(--accent)] hover:bg-[var(--accent-dim)] disabled:cursor-not-allowed disabled:opacity-50"
+            onclick={toggleTriePlay}
+            disabled={steps.length < 2 || !!loadError}
+          >
+            {triePlaying ? 'Pause' : 'Play steps'}
+          </button>
         </div>
-      {:else}
-        <p class="mt-1 text-sm text-[var(--muted)]">Run an operation to see the trie.</p>
       {/if}
     </section>
 

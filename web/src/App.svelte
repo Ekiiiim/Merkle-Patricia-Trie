@@ -224,10 +224,7 @@
     }
   }
 
-  /**
-   * Drop file DB session if any, then show an empty Memory trie.
-   * In Memory mode (no file), the same button clears the in-RAM trie (replay from empty).
-   */
+  /** Drop the loaded file DB session on the server and return to an empty in-RAM trie. */
   async function unloadDb() {
     apiError = null
     keyFieldError = null
@@ -481,43 +478,31 @@
       class="mt-3 grid grid-cols-1 gap-4 md:grid-cols-2 md:items-start md:gap-x-6 md:gap-y-4"
     >
       <!-- Database: dropdown + buttons on one row; active status on the next row under the dropdown -->
-      <div class="flex min-w-0 flex-col gap-2 md:border-r md:border-(--border) md:pr-6">
-        <h3 class="text-sm font-semibold">Database (optional)</h3>
-        <p class="text-xs text-(--muted) leading-snug">
-          Pick a database from the list to switch immediately: file DBs persist each operation; <strong>Memory</strong> is
-          an empty in-RAM trie (no file). <strong>Unload</strong> closes a loaded file DB and returns to Memory, or clears
-          the Memory trie when you are already in Memory mode.
-        </p>
-        <label class="text-xs font-medium text-(--muted)" for="dbsel">Database file</label>
-        <div class="flex flex-wrap items-end gap-2">
-          <select
-            id="dbsel"
-            class="min-w-40 max-w-full flex-1 rounded-lg border border-(--border) bg-(--bg) px-3 py-2 text-sm text-(--text) outline-none focus:border-(--accent) sm:max-w-xs"
-            bind:value={selectedDb}
-            onchange={onDbSelectChange}
-            disabled={busy || !!loadError}
-          >
-            <option value={MEMORY_DB}>Memory (in-RAM, empty on load)</option>
-            {#each dbs as name}
-              <option value={name}>{name}</option>
-            {/each}
-          </select>
-          <button
-            type="button"
-            class="shrink-0 rounded-lg border border-(--border) bg-(--surface) px-3 py-2 text-sm hover:border-(--accent) hover:bg-(--accent-dim) disabled:cursor-not-allowed disabled:opacity-50"
-            onclick={() => selectedDb && loadDb(selectedDb)}
-            disabled={busy || !!loadError || !selectedDb}
-          >
-            Load
-          </button>
-          <button
-            type="button"
-            class="shrink-0 rounded-lg border border-(--border) bg-(--surface) px-3 py-2 text-sm hover:border-(--accent) hover:bg-(--accent-dim) disabled:cursor-not-allowed disabled:opacity-50"
-            onclick={unloadDb}
-            disabled={busy || !!loadError}
-          >
-            Unload
-          </button>
+      <div class="flex min-w-0 w-full flex-col gap-2 md:border-r md:border-(--border) md:pr-6">
+        <div class="flex min-w-0 w-full flex-col gap-1">
+          <label class="text-xs font-medium text-(--muted)" for="dbsel">Database</label>
+          <div class="flex min-w-0 w-full flex-nowrap items-end gap-2">
+            <select
+              id="dbsel"
+              class="min-w-0 w-full flex-1 rounded-lg border border-(--border) bg-(--bg) px-3 py-2 text-sm text-(--text) outline-none focus:border-(--accent)"
+              bind:value={selectedDb}
+              onchange={onDbSelectChange}
+              disabled={busy || !!loadError}
+            >
+              <option value={MEMORY_DB}>None (empty in-RAM trie, non-persistent)</option>
+              {#each dbs as name}
+                <option value={name}>{name}</option>
+              {/each}
+            </select>
+            <button
+              type="button"
+              class="shrink-0 rounded-lg border border-(--border) bg-(--surface) px-3 py-2 text-sm hover:border-(--accent) hover:bg-(--accent-dim) disabled:cursor-not-allowed disabled:opacity-50"
+              onclick={unloadDb}
+              disabled={busy || !!loadError || !activeDb}
+            >
+              Unload
+            </button>
+          </div>
         </div>
         {#if activeDb}
           <p class="truncate text-xs leading-snug text-(--muted)" title={activeDb}>
@@ -525,7 +510,7 @@
           </p>
         {:else}
           <p class="text-xs leading-snug text-(--muted)">
-            Active: <code class="text-(--text)">Memory</code> (not persisted)
+            Active: <code class="text-(--text)">None</code> (empty in-RAM trie, non-persistent)
           </p>
         {/if}
       </div>

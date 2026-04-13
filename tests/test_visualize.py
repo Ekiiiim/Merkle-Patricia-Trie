@@ -16,7 +16,9 @@ def test_to_dot_contains_graph() -> None:
     assert "digraph MPT" in dot
     assert "Leaf" in dot
     full_h = node_hash(t.root).hex()
-    assert full_h[:32] in dot and full_h[32:] in dot
+    # Labels wrap long hex with Graphviz "\\n"; join those for a contiguous hash check.
+    collapsed = dot.replace("\\n", "")
+    assert full_h in collapsed
     assert "value=" in dot
     assert "path_nibbles_hex=" in dot
 

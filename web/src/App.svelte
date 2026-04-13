@@ -79,15 +79,23 @@
 
   $effect(() => {
     const engine = gv
-    const dot = steps[stepIndex]?.dot
+    const raw = steps[stepIndex]?.dot
+    const dot = typeof raw === 'string' ? raw.trim() : ''
     if (!engine || !dot) {
       trieSvg = ''
       return
     }
     try {
-      trieSvg = engine.layout(dot, 'svg', 'dot')
-    } catch (e) {
-      trieSvg = `<pre class="embed-err">${e instanceof Error ? e.message : String(e)}</pre>`
+      // Use dot() (not layout()); some WASM builds misbehave on repeated layout() calls.
+      trieSvg = engine.dot(dot, 'svg')
+    } catch (e1) {
+      try {
+        trieSvg = engine.dot(dot, 'svg_inline')
+      } catch (e2) {
+        const m1 = e1 instanceof Error ? e1.message : String(e1)
+        const m2 = e2 instanceof Error ? e2.message : String(e2)
+        trieSvg = `<pre class="embed-err">Graphviz: ${m1}\n(retry svg_inline: ${m2})</pre>`
+      }
     }
   })
 
@@ -238,6 +246,10 @@
     proveKey = 'alice'
     keyInput = 'alice'
     valueInput = '100'
+    if (activeDb) {
+      const unloaded = await unloadDb()
+      if (!unloaded) return
+    }
     await replayToServer([
       { op: 'insert', key: 'alice', value: '100' },
       { op: 'insert', key: 'bob', value: '200' },
@@ -347,9 +359,8 @@
     </p>
   {/if}
 
-  <div class="mt-5 flex flex-wrap items-start gap-5">
-    <section class="flex-1 basis-[280px] rounded-xl border border-(--border) bg-(--surface) p-4">
-      <h2 class="text-base font-semibold">Operations</h2>
+  <section class="mt-5 rounded-xl border border-(--border) bg-(--surface) p-4">
+    <h2 class="text-base font-semibold">Operations</h2>
       <p class="mt-1 text-sm text-(--muted)">
         Keys and values are UTF-8 strings (same style as <code>demo.py</code>).
       </p>
@@ -454,13 +465,16 @@
           Reset
         </button>
       </div>
+  </section>
 
-      <h3 class="mt-4 text-sm font-semibold">History</h3>
+  <div class="mt-5 flex flex-wrap items-stretch gap-5">
+    <section class="flex min-h-[280px] flex-1 basis-[280px] flex-col rounded-xl border border-(--border) bg-(--surface) p-4 min-w-0">
+      <h2 class="text-base font-semibold">History</h2>
       <p class="mt-1 text-xs text-(--muted)">Click a step to show that trie state in the graph.</p>
       {#if steps.length === 0}
         <p class="mt-2 text-sm text-(--muted)">No steps yet — run an operation or load a DB.</p>
       {:else}
-        <ul class="mt-2 flex max-h-[min(40vh,22rem)] flex-col gap-1 overflow-y-auto pr-1">
+        <ul class="mt-2 flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto pr-1">
           {#each steps as step, idx}
             <li class="list-none">
               <button
@@ -480,7 +494,7 @@
             </li>
           {/each}
         </ul>
-        <div class="mt-2 flex flex-wrap gap-2">
+        <div class="mt-2 flex shrink-0 flex-wrap gap-2">
           <button
             type="button"
             class="rounded-lg border border-(--border) bg-(--surface) px-3 py-2 text-sm hover:border-(--accent) hover:bg-(--accent-dim) disabled:cursor-not-allowed disabled:opacity-50"
@@ -493,10 +507,10 @@
       {/if}
     </section>
 
-    <section class="flex-[2_1_420px] rounded-xl border border-(--border) bg-(--surface) p-4 min-h-[280px]">
+    <section class="flex min-h-[280px] flex-[2_1_420px] flex-col rounded-xl border border-(--border) bg-(--surface) p-4 min-w-0">
       <h2 class="text-base font-semibold">Structure (Graphviz)</h2>
       {#if trieSvg}
-        <div class="graph-wrap mt-3 overflow-auto max-h-[70vh] rounded-lg bg-white p-2">
+        <div class="graph-wrap mt-3 min-h-0 flex-1 overflow-auto max-h-[70vh] rounded-lg bg-white p-2">
           {@html trieSvg}
         </div>
       {:else if !loadError}

@@ -45,6 +45,8 @@
     root_rlp_hex: string
     root_keccak_hex: string
   }>(null)
+  /** Verify-demo API failure; shown inside the verification section, not as global apiError. */
+  let verifySectionError = $state<string | null>(null)
   let lookupResult = $state<null | {
     found: boolean
     key: string
@@ -164,6 +166,7 @@
   async function activateMemoryMode() {
     apiError = null
     verifyResult = null
+    verifySectionError = null
     stopVerifyPlay()
     stopTriePlay()
     if (activeDb) {
@@ -194,6 +197,7 @@
     keyFieldError = null
     valueFieldError = null
     verifyResult = null
+    verifySectionError = null
     lookupResult = null
     stopVerifyPlay()
     stopTriePlay()
@@ -230,6 +234,7 @@
     keyFieldError = null
     valueFieldError = null
     verifyResult = null
+    verifySectionError = null
     lookupResult = null
     stopVerifyPlay()
     stopTriePlay()
@@ -277,6 +282,7 @@
       }
       keyFieldError = null
       valueFieldError = null
+      verifySectionError = null
       activeDb = typeof data.active_db === 'string' ? data.active_db : null
       operations = ops
       steps = data.steps ?? []
@@ -330,6 +336,7 @@
 
   async function resetAll() {
     verifyResult = null
+    verifySectionError = null
     lookupResult = null
     keyFieldError = null
     valueFieldError = null
@@ -403,6 +410,7 @@
 
   async function runVerifyDemo() {
     apiError = null
+    verifySectionError = null
     verifyResult = null
     stopVerifyPlay()
     busy = true
@@ -420,9 +428,10 @@
         20_000,
       )
       if (!res.ok) {
-        apiError = typeof (data as { detail?: string }).detail === 'string'
-          ? (data as { detail: string }).detail
-          : res.statusText
+        verifySectionError =
+          typeof (data as { detail?: string }).detail === 'string'
+            ? (data as { detail: string }).detail
+            : res.statusText
         return
       }
       verifyResult = data as NonNullable<typeof verifyResult>
@@ -727,6 +736,15 @@
         Run verification walkthrough
       </button>
     </div>
+
+    {#if verifySectionError}
+      <p
+        class="mt-3 rounded-lg border border-(--bad) bg-(--surface) px-3 py-2 text-sm text-(--bad)"
+        role="alert"
+      >
+        {verifySectionError}
+      </p>
+    {/if}
 
     {#if verifyResult}
       <div class="mt-3 rounded-lg border border-(--border) bg-(--bg) p-3">

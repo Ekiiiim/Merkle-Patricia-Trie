@@ -31,6 +31,8 @@
 
   let keyInput = $state('alice')
   let valueInput = $state('100')
+  let keyFieldError = $state<string | null>(null)
+  let valueFieldError = $state<string | null>(null)
   let proveKey = $state('alice')
 
   let verifyResult = $state<null | {
@@ -42,6 +44,13 @@
     verified: boolean
     root_rlp_hex: string
     root_keccak_hex: string
+  }>(null)
+  let lookupResult = $state<null | {
+    found: boolean
+    key: string
+    value_utf8: string | null
+    value_hex: string | null
+    state_root_hex: string
   }>(null)
   let verifyStepIndex = $state(0)
   let triePlaying = $state(false)
@@ -88,15 +97,23 @@
 
   $effect(() => {
     const engine = gv
-    const dot = steps[stepIndex]?.dot
+    const raw = steps[stepIndex]?.dot
+    const dot = typeof raw === 'string' ? raw.trim() : ''
     if (!engine || !dot) {
       trieSvg = ''
       return
     }
     try {
-      trieSvg = engine.layout(dot, 'svg', 'dot')
-    } catch (e) {
-      trieSvg = `<pre class="embed-err">${e instanceof Error ? e.message : String(e)}</pre>`
+      // Use dot() (not layout()); some WASM builds misbehave on repeated layout() calls.
+      trieSvg = engine.dot(dot, 'svg')
+    } catch (e1) {
+      try {
+        trieSvg = engine.dot(dot, 'svg_inline')
+      } catch (e2) {
+        const m1 = e1 instanceof Error ? e1.message : String(e1)
+        const m2 = e2 instanceof Error ? e2.message : String(e2)
+        trieSvg = `<pre class="embed-err">Graphviz: ${m1}\n(retry svg_inline: ${m2})</pre>`
+      }
     }
   })
 
@@ -174,7 +191,10 @@
       return await activateMemoryMode()
     }
     apiError = null
+    keyFieldError = null
+    valueFieldError = null
     verifyResult = null
+    lookupResult = null
     stopVerifyPlay()
     stopTriePlay()
     busy = true
@@ -210,7 +230,10 @@
    */
   async function unloadDb() {
     apiError = null
+    keyFieldError = null
+    valueFieldError = null
     verifyResult = null
+    lookupResult = null
     stopVerifyPlay()
     stopTriePlay()
     busy = true
@@ -235,6 +258,7 @@
 
   async function replayToServer(ops: TrieOp[]) {
     apiError = null
+    lookupResult = null
     busy = true
     try {
       const { res, data } = await fetchJson<{
@@ -254,6 +278,8 @@
         apiError = typeof data.detail === 'string' ? data.detail : res.statusText
         return false
       }
+      keyFieldError = null
+      valueFieldError = null
       activeDb = typeof data.active_db === 'string' ? data.active_db : null
       operations = ops
       steps = data.steps ?? []
@@ -266,12 +292,24 @@
   }
 
   async function insertOp() {
+    keyFieldError = null
+    valueFieldError = null
     const k = keyInput.trim()
-    if (!k) return
-    await replayToServer([...operations, { op: 'insert', key: k, value: valueInput }])
+    if (!k) {
+      keyFieldError = 'Key is required to insert.'
+      return
+    }
+    const v = String(valueInput ?? '').trim()
+    if (!v) {
+      valueFieldError = 'Value is required to insert.'
+      return
+    }
+    await replayToServer([...operations, { op: 'insert', key: k, value: v }])
   }
 
   async function deleteOp() {
+    keyFieldError = null
+    valueFieldError = null
     const k = keyInput.trim()
     if (!k) return
     await replayToServer([...operations, { op: 'delete', key: k }])
@@ -281,6 +319,10 @@
     proveKey = 'alice'
     keyInput = 'alice'
     valueInput = '100'
+    if (activeDb) {
+      const unloaded = await unloadDb()
+      if (!unloaded) return
+    }
     await replayToServer([
       { op: 'insert', key: 'alice', value: '100' },
       { op: 'insert', key: 'bob', value: '200' },
@@ -291,6 +333,9 @@
 
   async function resetAll() {
     verifyResult = null
+    lookupResult = null
+    keyFieldError = null
+    valueFieldError = null
     stopVerifyPlay()
     if (activeDb) {
       await loadDb(activeDb)
@@ -318,6 +363,45 @@
       local = (local + 1) % n
       stepIndex = local
     }, 1500)
+  }
+
+  async function runLookup() {
+    const k = keyInput.trim()
+    if (!k) return
+    apiError = null
+    lookupResult = null
+    busy = true
+    try {
+      const { res, data } = await fetchJson<{
+        detail?: string
+        found?: boolean
+        key?: string
+        value_utf8?: string | null
+        value_hex?: string | null
+        state_root_hex?: string
+      }>(
+        '/api/lookup',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ operations, key: k }),
+        },
+        20_000,
+      )
+      if (!res.ok) {
+        apiError = typeof data.detail === 'string' ? data.detail : res.statusText
+        return
+      }
+      lookupResult = {
+        found: !!data.found,
+        key: typeof data.key === 'string' ? data.key : k,
+        value_utf8: data.value_utf8 ?? null,
+        value_hex: data.value_hex ?? null,
+        state_root_hex: typeof data.state_root_hex === 'string' ? data.state_root_hex : '',
+      }
+    } finally {
+      busy = false
+    }
   }
 
   async function runVerifyDemo() {
@@ -372,10 +456,6 @@
 <div class="mx-auto max-w-6xl px-6 py-5 pb-12">
   <header>
     <h1 class="text-2xl font-semibold tracking-tight">Merkle Patricia Trie</h1>
-    <p class="mt-1 max-w-3xl text-sm text-(--muted)">
-      Ethereum-style RLP + Keccak-256. Click a history step to view the trie at that point, then run a proof
-      verification walkthrough.
-    </p>
   </header>
 
   {#if loadError}
@@ -390,26 +470,29 @@
     </p>
   {/if}
 
-  <div class="mt-5 flex flex-wrap items-start gap-5">
-    <section class="flex-1 basis-[280px] rounded-xl border border-(--border) bg-(--surface) p-4">
-      <h2 class="text-base font-semibold">Operations</h2>
-      <p class="mt-1 text-sm text-(--muted)">
-        Keys and values are UTF-8 strings (same style as <code>demo.py</code>).
-      </p>
+  <section class="mt-5 rounded-xl border border-(--border) bg-(--surface) p-4">
+    <h2 class="text-base font-semibold">Operations</h2>
+    <p class="mt-1 text-xs text-(--muted) leading-snug">
+      UTF-8 keys and values (<code>demo.py</code> style). With a database loaded, replays commit to disk; otherwise the trie
+      stays in memory.
+    </p>
 
-      <h3 class="mt-4 text-sm font-semibold">Database (optional)</h3>
-      <p class="mt-1 text-sm text-(--muted)">
-        Pick a database from the list to switch immediately: file DBs persist each operation; <strong>Memory</strong> is
-        an empty in-RAM trie (no file). <strong>Unload</strong> closes a loaded file DB and returns to Memory, or clears
-        the Memory trie when you are already in Memory mode.
-      </p>
-
-      <div class="mt-2 flex flex-wrap items-end gap-2">
-        <div class="flex flex-col gap-1">
-          <label class="block text-xs font-medium text-(--muted)" for="dbsel">DB</label>
+    <div
+      class="mt-3 grid grid-cols-1 gap-4 md:grid-cols-2 md:items-start md:gap-x-6 md:gap-y-4"
+    >
+      <!-- Database: dropdown + buttons on one row; active status on the next row under the dropdown -->
+      <div class="flex min-w-0 flex-col gap-2 md:border-r md:border-(--border) md:pr-6">
+        <h3 class="text-sm font-semibold">Database (optional)</h3>
+        <p class="text-xs text-(--muted) leading-snug">
+          Pick a database from the list to switch immediately: file DBs persist each operation; <strong>Memory</strong> is
+          an empty in-RAM trie (no file). <strong>Unload</strong> closes a loaded file DB and returns to Memory, or clears
+          the Memory trie when you are already in Memory mode.
+        </p>
+        <label class="text-xs font-medium text-(--muted)" for="dbsel">Database file</label>
+        <div class="flex flex-wrap items-end gap-2">
           <select
             id="dbsel"
-            class="w-full max-w-64 rounded-lg border border-(--border) bg-(--bg) px-3 py-2 text-sm text-(--text) outline-none focus:border-(--accent)"
+            class="min-w-40 max-w-full flex-1 rounded-lg border border-(--border) bg-(--bg) px-3 py-2 text-sm text-(--text) outline-none focus:border-(--accent) sm:max-w-xs"
             bind:value={selectedDb}
             onchange={onDbSelectChange}
             disabled={busy || !!loadError}
@@ -419,90 +502,178 @@
               <option value={name}>{name}</option>
             {/each}
           </select>
+          <button
+            type="button"
+            class="shrink-0 rounded-lg border border-(--border) bg-(--surface) px-3 py-2 text-sm hover:border-(--accent) hover:bg-(--accent-dim) disabled:cursor-not-allowed disabled:opacity-50"
+            onclick={() => selectedDb && loadDb(selectedDb)}
+            disabled={busy || !!loadError || !selectedDb}
+          >
+            Load
+          </button>
+          <button
+            type="button"
+            class="shrink-0 rounded-lg border border-(--border) bg-(--surface) px-3 py-2 text-sm hover:border-(--accent) hover:bg-(--accent-dim) disabled:cursor-not-allowed disabled:opacity-50"
+            onclick={unloadDb}
+            disabled={busy || !!loadError}
+          >
+            Unload
+          </button>
         </div>
-
-        <button
-          type="button"
-          class="rounded-lg border border-(--border) bg-(--surface) px-3 py-2 text-sm hover:border-(--accent) hover:bg-(--accent-dim) disabled:cursor-not-allowed disabled:opacity-50"
-          onclick={unloadDb}
-          disabled={busy || !!loadError}
-        >
-          Unload
-        </button>
+        {#if activeDb}
+          <p class="truncate text-xs leading-snug text-(--muted)" title={activeDb}>
+            Active: <code class="text-(--text)">{activeDb}</code>
+          </p>
+        {:else}
+          <p class="text-xs leading-snug text-(--muted)">
+            Active: <code class="text-(--text)">Memory</code> (not persisted)
+          </p>
+        {/if}
       </div>
 
-      {#if activeDb}
-        <p class="mt-2 text-xs text-(--muted)">
-          Active DB: <code>{activeDb}</code>
-        </p>
-      {:else}
-        <p class="mt-2 text-xs text-(--muted)">
-          Active: <code>Memory</code> (not persisted)
-        </p>
-      {/if}
-
-      <div class="mt-3">
-        <label class="block text-xs font-medium text-(--muted)" for="key">Key</label>
-        <input
-          class="mt-1 w-full max-w-64 rounded-lg border border-(--border) bg-(--bg) px-3 py-2 text-sm text-(--text) outline-none focus:border-(--accent)"
-          id="key"
-          type="text"
-          bind:value={keyInput}
-          disabled={busy}
-        />
+      <!-- Key / value on one row; actions below -->
+      <div class="flex min-w-0 flex-col gap-2">
+        <div class="grid grid-cols-2 gap-2 sm:gap-3">
+          <div class="flex min-w-0 flex-col gap-1">
+            <label class="text-xs font-medium text-(--muted)" for="key">Key</label>
+            <input
+              class="w-full min-w-0 rounded-lg border bg-(--bg) px-3 py-2 text-sm text-(--text) outline-none focus:border-(--accent) {keyFieldError
+                ? 'border-(--bad)'
+                : 'border-(--border)'}"
+              id="key"
+              type="text"
+              bind:value={keyInput}
+              disabled={busy}
+              aria-invalid={keyFieldError ? 'true' : 'false'}
+              aria-describedby={keyFieldError ? 'key-field-error' : undefined}
+              oninput={() => {
+                keyFieldError = null
+              }}
+            />
+            {#if keyFieldError}
+              <p id="key-field-error" class="mt-0.5 text-xs leading-snug text-(--bad)" role="alert">
+                {keyFieldError}
+              </p>
+            {/if}
+          </div>
+          <div class="flex min-w-0 flex-col gap-1">
+            <label class="text-xs font-medium text-(--muted)" for="val">Value</label>
+            <input
+              class="w-full min-w-0 rounded-lg border bg-(--bg) px-3 py-2 text-sm text-(--text) outline-none focus:border-(--accent) {valueFieldError
+                ? 'border-(--bad)'
+                : 'border-(--border)'}"
+              id="val"
+              type="text"
+              bind:value={valueInput}
+              disabled={busy}
+              title="Used for Insert"
+              aria-invalid={valueFieldError ? 'true' : 'false'}
+              aria-describedby={valueFieldError ? 'value-field-error' : undefined}
+              oninput={() => {
+                valueFieldError = null
+              }}
+            />
+            {#if valueFieldError}
+              <p id="value-field-error" class="mt-0.5 text-xs leading-snug text-(--bad)" role="alert">
+                {valueFieldError}
+              </p>
+            {/if}
+          </div>
+        </div>
+        <div class="flex min-w-0 flex-wrap gap-2">
+          <button
+            type="button"
+            class="rounded-lg border border-transparent bg-(--accent) px-3 py-2 text-sm font-semibold text-[#0f1219] hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+            onclick={insertOp}
+            disabled={busy || !!loadError}
+          >
+            Insert
+          </button>
+          <button
+            type="button"
+            class="rounded-lg border border-(--border) bg-(--surface) px-3 py-2 text-sm hover:border-(--accent) hover:bg-(--accent-dim) disabled:cursor-not-allowed disabled:opacity-50"
+            onclick={deleteOp}
+            disabled={busy || !!loadError}
+          >
+            Delete
+          </button>
+          <button
+            type="button"
+            class="rounded-lg border border-(--border) bg-(--surface) px-3 py-2 text-sm hover:border-(--accent) hover:bg-(--accent-dim) disabled:cursor-not-allowed disabled:opacity-50"
+            onclick={runLookup}
+            disabled={busy || !!loadError || !keyInput.trim()}
+          >
+            Lookup
+          </button>
+          <button
+            type="button"
+            class="rounded-lg border border-(--border) bg-(--surface) px-3 py-2 text-sm hover:border-(--accent) hover:bg-(--accent-dim) disabled:cursor-not-allowed disabled:opacity-50"
+            onclick={loadSample}
+            disabled={busy || !!loadError}
+          >
+            Sample
+          </button>
+          <button
+            type="button"
+            class="rounded-lg border border-(--border) bg-(--surface) px-3 py-2 text-sm hover:border-(--accent) hover:bg-(--accent-dim) disabled:cursor-not-allowed disabled:opacity-50"
+            onclick={resetAll}
+            disabled={busy || !!loadError}
+          >
+            Reset
+          </button>
+        </div>
       </div>
-      <div class="mt-3">
-        <label class="block text-xs font-medium text-(--muted)" for="val">Value (insert only)</label>
-        <input
-          class="mt-1 w-full max-w-64 rounded-lg border border-(--border) bg-(--bg) px-3 py-2 text-sm text-(--text) outline-none focus:border-(--accent)"
-          id="val"
-          type="text"
-          bind:value={valueInput}
-          disabled={busy}
-        />
-      </div>
+    </div>
 
-      <div class="mt-3 flex flex-wrap gap-2">
-        <button
-          type="button"
-          class="rounded-lg border border-transparent bg-(--accent) px-3 py-2 text-sm font-semibold text-[#0f1219] hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
-          onclick={insertOp}
-          disabled={busy || !!loadError}
-        >
-          Insert
-        </button>
-        <button
-          type="button"
-          class="rounded-lg border border-(--border) bg-(--surface) px-3 py-2 text-sm hover:border-(--accent) hover:bg-(--accent-dim) disabled:cursor-not-allowed disabled:opacity-50"
-          onclick={deleteOp}
-          disabled={busy || !!loadError}
-        >
-          Delete
-        </button>
-        <button
-          type="button"
-          class="rounded-lg border border-(--border) bg-(--surface) px-3 py-2 text-sm hover:border-(--accent) hover:bg-(--accent-dim) disabled:cursor-not-allowed disabled:opacity-50"
-          onclick={loadSample}
-          disabled={busy || !!loadError}
-        >
-          Load sample
-        </button>
-        <button
-          type="button"
-          class="rounded-lg border border-(--border) bg-(--surface) px-3 py-2 text-sm hover:border-(--accent) hover:bg-(--accent-dim) disabled:cursor-not-allowed disabled:opacity-50"
-          onclick={resetAll}
-          disabled={busy || !!loadError}
-        >
-          Reset
-        </button>
-      </div>
+    {#if lookupResult}
+      <p
+        class="mt-3 rounded-xl border border-(--border) bg-(--bg) px-4 py-3 text-sm leading-relaxed md:px-5 md:py-4 md:text-base"
+      >
+        {#if lookupResult.found}
+          <span class="text-base font-medium text-(--text) md:text-lg">
+            <code class="rounded bg-(--surface) px-1.5 py-0.5 text-[0.95em]">{lookupResult.key}</code> →
+          </span>
+          <span class="ml-2 font-mono text-base text-(--text) md:text-lg">{lookupResult.value_utf8 ?? '—'}</span>
+          <span class="mt-2 block font-mono text-xs text-(--muted) break-all md:text-sm">
+            hex {lookupResult.value_hex} · root {lookupResult.state_root_hex}
+          </span>
+        {:else}
+          <span class="text-base text-(--muted) md:text-lg">
+            No entry for <code class="rounded bg-(--surface) px-1.5 py-0.5 text-(--text)">{lookupResult.key}</code>.
+          </span>
+          <span class="mt-2 block font-mono text-xs text-(--muted) break-all md:text-sm">{lookupResult.state_root_hex}</span>
+        {/if}
+      </p>
+    {/if}
+  </section>
 
-      <h3 class="mt-4 text-sm font-semibold">History</h3>
-      <p class="mt-1 text-xs text-(--muted)">Click a step to show that trie state in the graph.</p>
+  <div
+    class="mt-5 grid grid-cols-1 gap-5 md:grid-cols-[minmax(260px,1fr)_minmax(0,2fr)] md:items-stretch md:gap-5 md:min-h-[70vh]"
+  >
+    <section
+      class="flex min-h-[280px] min-w-0 flex-col rounded-xl border border-(--border) bg-(--surface) p-4 md:h-full md:min-h-0"
+    >
+      <div class="flex shrink-0 flex-wrap items-start justify-between gap-2">
+        <h2 class="text-base font-semibold">History</h2>
+        {#if steps.length >= 2}
+          <button
+            type="button"
+            class="shrink-0 rounded-lg border border-(--border) bg-(--surface) px-3 py-2 text-sm hover:border-(--accent) hover:bg-(--accent-dim) disabled:cursor-not-allowed disabled:opacity-50"
+            onclick={toggleTriePlay}
+            disabled={busy || !!loadError}
+          >
+            {triePlaying ? 'Pause' : 'Play steps'}
+          </button>
+        {/if}
+      </div>
+      <p class="mt-1 shrink-0 text-xs text-(--muted)">Click a step to show that trie state in the graph.</p>
       {#if steps.length === 0}
-        <p class="mt-2 text-sm text-(--muted)">No steps yet - run an operation or pick a DB above.</p>
+        <p class="mt-2 flex-1 text-sm text-(--muted) md:min-h-0">
+          No steps yet - run an operation or pick a database above.
+        </p>
       {:else}
-        <ul class="mt-2 flex max-h-[min(40vh,22rem)] flex-col gap-1 overflow-y-auto pr-1">
+        <ul
+          class="mt-2 flex min-h-0 max-h-[70vh] flex-1 flex-col gap-1 overflow-y-auto pr-1 md:max-h-none"
+        >
           {#each steps as step, idx}
             <li class="list-none">
               <button
@@ -522,23 +693,17 @@
             </li>
           {/each}
         </ul>
-        <div class="mt-2 flex flex-wrap gap-2">
-          <button
-            type="button"
-            class="rounded-lg border border-(--border) bg-(--surface) px-3 py-2 text-sm hover:border-(--accent) hover:bg-(--accent-dim) disabled:cursor-not-allowed disabled:opacity-50"
-            onclick={toggleTriePlay}
-            disabled={steps.length < 2 || !!loadError}
-          >
-            {triePlaying ? 'Pause' : 'Play steps'}
-          </button>
-        </div>
       {/if}
     </section>
 
-    <section class="flex-[2_1_420px] rounded-xl border border-(--border) bg-(--surface) p-4 min-h-[280px]">
-      <h2 class="text-base font-semibold">Structure (Graphviz)</h2>
+    <section
+      class="flex min-h-[280px] min-w-0 flex-col rounded-xl border border-(--border) bg-(--surface) p-4 md:h-full md:min-h-0"
+    >
+      <h2 class="shrink-0 text-base font-semibold">Structure (Graphviz)</h2>
       {#if trieSvg}
-        <div class="graph-wrap mt-3 overflow-auto max-h-[70vh] rounded-lg bg-white p-2">
+        <div
+          class="graph-wrap mt-3 max-h-[70vh] min-h-0 flex-1 overflow-auto rounded-lg bg-white p-2 md:max-h-none"
+        >
           {@html trieSvg}
         </div>
       {:else if steps.length > 0 && !steps[stepIndex]?.dot}
@@ -547,7 +712,7 @@
           aria-label="Empty trie (no graph nodes)"
         ></div>
       {:else if !loadError}
-        <p class="mt-3 text-sm text-(--muted)">Graph appears after the first successful replay.</p>
+        <p class="mt-3 flex-1 text-sm text-(--muted) md:min-h-0">Graph appears after the first successful replay.</p>
       {/if}
     </section>
   </div>

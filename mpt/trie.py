@@ -687,7 +687,14 @@ class MerklePatriciaTrie:
         Args:
             key: The raw byte key.
             value: The byte value to be stored.
+
+        Raises:
+            TypeError: If ``key`` or ``value`` is ``None``.
         """
+        if key is None:
+            raise TypeError("insert key must not be None")
+        if value is None:
+            raise TypeError("insert value must not be None")
         nib = _key_to_path(key)
         self.root = _insert(self.root, nib, value, self.db)
 

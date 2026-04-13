@@ -35,12 +35,19 @@ def _wrap_text(s: str, width: int = 32) -> str:
     return "\\n".join(s[i : i + width] for i in range(0, len(s), width))
 
 
+# Max characters per line inside node boxes (prefix + hex must share the same budget).
+_LABEL_WRAP = 20
+
+# Inches: space between label text and node border (x, y). Wider x keeps monospace off the sides.
+_NODE_MARGIN = "0.32,0.14"
+
+
 def _hash_label(node: Optional[Node]) -> str:
-    return _wrap_hex(node_hash(node).hex(), width=32)
+    return _wrap_hex(node_hash(node).hex(), width=_LABEL_WRAP)
 
 
 def _rlp_label(node: Node) -> str:
-    return _wrap_hex(encode_node(node).hex(), width=48)
+    return _wrap_hex(encode_node(node).hex(), width=_LABEL_WRAP)
 
 def _is_readable_ascii(s: str) -> bool:
     # Prefer a conservative "printable" subset for DOT labels.
@@ -91,16 +98,18 @@ def _emit_trie(
         if isinstance(node, Leaf):
             nid = new_id()
             full_path = prefix + node.path
-            # For visualization, prefer wrapping over truncation.
+            # Wrap the full "key=value" so the prefix does not sit on one long first line.
             path_disp = _esc_label_value(
-                _wrap_text("0x" + _nibbles_hex(full_path), width=24)
+                _wrap_text("path_nibbles_hex=0x" + _nibbles_hex(full_path), width=_LABEL_WRAP)
             )
-            val_disp = _esc_label_value(_wrap_text(_bytes_readable(node.value, max_len=None), width=24))
+            val_disp = _esc_label_value(
+                _wrap_text("value=" + _bytes_readable(node.value, max_len=None), width=_LABEL_WRAP)
+            )
             lines.append(
                 f'{indent}{nid} [shape=box,style=filled,fillcolor="#e8f5e9",fontsize=9,'
                 f'label="Leaf\\n'
-                f"path_nibbles_hex={path_disp}\\n"
-                f"value={val_disp}\\n"
+                f"{path_disp}\\n"
+                f"{val_disp}\\n"
                 f"node_hash_keccak256=\\n{_hash_label(node)}"
                 f'"];'
             )
@@ -109,10 +118,13 @@ def _emit_trie(
             nid = new_id()
             full_path = prefix + node.path
             path_hex = _nibbles_hex(full_path)
+            path_disp = _esc_label_value(
+                _wrap_text("path_nibbles_hex=0x" + path_hex, width=_LABEL_WRAP)
+            )
             lines.append(
                 f'{indent}{nid} [shape=ellipse,style=filled,fillcolor="#e3f2fd",fontsize=9,'
                 f'label="Extension\\n'
-                f"path_nibbles_hex={path_hex}\\n"
+                f"{path_disp}\\n"
                 f"node_hash_keccak256=\\n{_hash_label(node)}\\n"
                 f"rlp_hex=\\n{_rlp_label(node)}"
                 f'"];'
@@ -139,16 +151,19 @@ def _emit_trie(
             if node.value is not None:
                 vv = node.value.hex()
                 term = new_id()
+                term_lbl = _esc_label_value(
+                    _wrap_text("branch_terminal_value_hex=" + vv, width=_LABEL_WRAP)
+                )
                 lines.append(
                     f'{indent}{term} [shape=note,fillcolor="#fce4ec",fontsize=9,'
-                    f'label="branch_terminal_value_hex={vv}"];'
+                    f'label="{term_lbl}"];'
                 )
                 lines.append(f'{indent}{nid} -> {term} [style=dashed,label="$"];')
             return nid
         raise TypeError(node)
 
     if root is None:
-        lines.append(f'{indent}{id_prefix}_empty [shape=plaintext,label="empty trie"];')
+        lines.append(f'{indent}{id_prefix}_empty [shape=plaintext,label="(empty trie)"];')
     else:
         emit(root, ())
 
@@ -165,8 +180,8 @@ def trie_to_dot(root: Optional[Node], *, title: str = "MPT") -> str:
     lines: list[str] = [
         "digraph MPT {",
         '  rankdir=TB;',
-        '  graph [fontname="monospace"];',
-        '  node [fontname="monospace"];',
+        '  graph [charset="UTF-8", fontname="monospace"];',
+        f'  node [fontname="monospace", margin="{_NODE_MARGIN}"];',
         f'  label="{_esc(title)}";',
         "  labelloc=t;",
     ]
@@ -188,8 +203,8 @@ def evolution_to_dot(
     """
     lines: list[str] = [
         "digraph MPT_evolution {",
-        '  graph [fontname="monospace", fontsize=10];',
-        '  node [fontname="monospace"];',
+        '  graph [charset="UTF-8", fontname="monospace", fontsize=10];',
+        f'  node [fontname="monospace", margin="{_NODE_MARGIN}"];',
         '  rankdir=LR;',
         "  newrank=true;",
         "  compound=true;",

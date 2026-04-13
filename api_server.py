@@ -115,9 +115,9 @@ def replay(body: ReplayRequest) -> dict:
             t = MerklePatriciaTrie()
             steps: list[dict] = [
                 {
-                    "label": "0 — empty trie",
+                    "label": "0 - empty trie",
                     "state_root_hex": t.state_root().hex(),
-                    "dot": trie_to_dot(t.snapshot(), title="0 — empty trie"),
+                    "dot": trie_to_dot(t.snapshot(), title="0 - empty trie"),
                 }
             ]
             for idx, o in enumerate(body.operations):
@@ -125,14 +125,14 @@ def replay(body: ReplayRequest) -> dict:
                     if o.value is None:
                         raise HTTPException(status_code=400, detail="insert requires value")
                     t.insert(o.key.encode("utf-8"), o.value.encode("utf-8"))
-                    label = f"{idx + 1} — insert({o.key} → {o.value})"
+                    label = f"{idx + 1} - insert({o.key} -> {o.value})"
                 else:
                     if not t.delete(o.key.encode("utf-8")):
                         raise HTTPException(
                             status_code=400,
                             detail=f"delete: key not found ({o.key!r})",
                         )
-                    label = f"{idx + 1} — delete({o.key})"
+                    label = f"{idx + 1} - delete({o.key})"
                 snap = t.snapshot()
                 steps.append(
                     {
@@ -166,14 +166,14 @@ def replay(body: ReplayRequest) -> dict:
                 if o.value is None:
                     raise HTTPException(status_code=400, detail="insert requires value")
                 pmpt.insert(o.key.encode("utf-8"), o.value.encode("utf-8"))
-                label = f"{len(_active_steps)} — insert({o.key} → {o.value})"
+                label = f"{len(_active_steps)} - insert({o.key} -> {o.value})"
             else:
                 if not pmpt.delete(o.key.encode("utf-8")):
                     raise HTTPException(
                         status_code=400,
                         detail=f"delete: key not found ({o.key!r})",
                     )
-                label = f"{len(_active_steps)} — delete({o.key})"
+                label = f"{len(_active_steps)} - delete({o.key})"
             pmpt.commit()
             snap = pmpt.trie.snapshot()
             step = {
@@ -249,14 +249,14 @@ def verify_demo(body: VerifyDemoRequest) -> dict:
                 if o.value is None:
                     raise HTTPException(status_code=400, detail="insert requires value")
                 pmpt.insert(o.key.encode("utf-8"), o.value.encode("utf-8"))
-                label = f"{steps_len} — insert({o.key} → {o.value})"
+                label = f"{steps_len} - insert({o.key} -> {o.value})"
             else:
                 if not pmpt.delete(o.key.encode("utf-8")):
                     raise HTTPException(
                         status_code=400,
                         detail=f"delete: key not found ({o.key!r})",
                     )
-                label = f"{steps_len} — delete({o.key})"
+                label = f"{steps_len} - delete({o.key})"
             pmpt.commit()
             snap = pmpt.trie.snapshot()
             step = {
@@ -320,9 +320,9 @@ def db_list() -> dict:
         with PersistentMPT(str(p), create_if_missing=False) as pmpt:
             snap = pmpt.trie.snapshot()
             step0 = {
-                "label": f"0 — loaded DB ({active})",
+                "label": f"0 - loaded DB ({active})",
                 "state_root_hex": pmpt.state_root().hex(),
-                "dot": trie_to_dot(snap, title=f"0 — loaded DB ({active})"),
+                "dot": trie_to_dot(snap, title=f"0 - loaded DB ({active})"),
             }
         with _state_lock:
             _active_ops.clear()
@@ -348,9 +348,9 @@ def db_load(body: DbLoadRequest) -> dict:
         snap = pmpt.trie.snapshot()
         sr_hex = pmpt.state_root().hex()
         step0 = {
-            "label": f"0 — loaded DB ({body.db_name})",
+            "label": f"0 - loaded DB ({body.db_name})",
             "state_root_hex": sr_hex,
-            "dot": trie_to_dot(snap, title=f"0 — loaded DB ({body.db_name})"),
+            "dot": trie_to_dot(snap, title=f"0 - loaded DB ({body.db_name})"),
         }
 
     with _state_lock:

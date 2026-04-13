@@ -744,7 +744,7 @@ class MerklePatriciaTrie:
             title: The label/title for the generated graph.
 
         Returns:
-            A string in DOT format.
+            A string in DOT format, or an empty string when the trie has no nodes.
         """
 
         from mpt.visualize import trie_to_dot

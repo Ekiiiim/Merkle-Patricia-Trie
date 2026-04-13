@@ -169,6 +169,14 @@ def _emit_trie(
 
 
 def trie_to_dot(root: Optional[Node], *, title: str = "MPT") -> str:
+    """
+    Return Graphviz DOT for ``root``.
+
+    For an empty trie (``root is None``), returns an empty string so UIs that run
+    Graphviz in WASM can show a blank canvas instead of a malformed SVG.
+    """
+    if root is None:
+        return ""
     lines: list[str] = [
         "digraph MPT {",
         '  rankdir=TB;',
@@ -185,7 +193,7 @@ def trie_to_dot(root: Optional[Node], *, title: str = "MPT") -> str:
 def evolution_to_dot(
     steps: list[tuple[str, Optional[Node], str]],
     *,
-    title: str = "MPT — step-by-step",
+    title: str = "MPT - step-by-step",
 ) -> str:
     """
     One Graphviz file with a `subgraph cluster_*` per step so the audience can

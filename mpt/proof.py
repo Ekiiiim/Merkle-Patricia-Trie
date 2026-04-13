@@ -111,7 +111,7 @@ def verify_inclusion_trace(
         steps.append(row)
 
     if not proof:
-        add("Stopped", "Proof is empty — cannot verify.", ok=False)
+        add("Stopped", "Proof is empty - cannot verify.", ok=False)
         return False, steps
 
     rh = keccak256(proof[0])
@@ -183,7 +183,7 @@ def verify_inclusion_trace(
             if len(rem) < pl or tuple(rem[:pl]) != nibbles:
                 add(
                     "Path mismatch",
-                    "Key does not contain extension path — proof invalid for this key.",
+                    "Key does not contain extension path - proof invalid for this key.",
                     ok=False,
                 )
                 return False, steps
@@ -247,11 +247,11 @@ def verify_inclusion_trace(
             rem = rem[1:]
             add(
                 f"Depth {depth}: branch node",
-                f"Next nibble {n:x} — follow child slot {n:x}.",
+                f"Next nibble {n:x} - follow child slot {n:x}.",
             )
             ref = node[n]
             if not ref:
-                add("Empty child", "Branch child slot is empty — cannot prove this key.", ok=False)
+                add("Empty child", "Branch child slot is empty - cannot prove this key.", ok=False)
                 return False, steps
             if len(ref) < 32:
                 nxt = ref

@@ -13,6 +13,9 @@
     proof_index?: number
   }
 
+  /** Synthetic DB row: in-RAM trie only (no SQLite file). Must not match real `db/*.db` names. */
+  const MEMORY_DB = '__MPT_MEMORY__'
+
   let gv: Graphviz | null = $state(null)
   let loadError = $state<string | null>(null)
   let steps = $state<Step[]>([])
@@ -78,7 +81,13 @@
       }
     })()
 
-    void refreshDbList()
+    void (async () => {
+      await refreshDbList()
+      // Memory is default: show empty trie without requiring an insert first.
+      if (!activeDb) {
+        await replayToServer([])
+      }
+    })()
 
     return () => {
       if (triePlayTimer) clearInterval(triePlayTimer)
@@ -135,7 +144,11 @@
       if (res.ok) {
         dbs = data.dbs ?? []
         activeDb = typeof data.active_db === 'string' ? data.active_db : null
-        if (!selectedDb) selectedDb = activeDb ?? (dbs[0] ?? '')
+        if (activeDb) {
+          selectedDb = activeDb
+        } else if (!selectedDb) {
+          selectedDb = MEMORY_DB
+        }
         // Rehydrate trie graph + op history after full page reload while server still has a DB session.
         if (activeDb && Array.isArray(data.steps) && data.steps.length > 0) {
           operations = data.operations ?? []
@@ -148,7 +161,35 @@
     }
   }
 
+  async function activateMemoryMode() {
+    apiError = null
+    verifyResult = null
+    stopVerifyPlay()
+    stopTriePlay()
+    if (activeDb) {
+      return await unloadDb()
+    }
+    selectedDb = MEMORY_DB
+    return await replayToServer([])
+  }
+
+  async function applyDbSelection(name: string) {
+    if (!name) return
+    if (name === MEMORY_DB) {
+      await activateMemoryMode()
+    } else {
+      await loadDb(name)
+    }
+  }
+
+  function onDbSelectChange() {
+    void applyDbSelection(selectedDb)
+  }
+
   async function loadDb(name: string) {
+    if (name === MEMORY_DB) {
+      return await activateMemoryMode()
+    }
     apiError = null
     keyFieldError = null
     valueFieldError = null
@@ -169,6 +210,7 @@
       )
       if (!res.ok) {
         apiError = typeof data.detail === 'string' ? data.detail : res.statusText
+        selectedDb = activeDb ?? MEMORY_DB
         return false
       }
       activeDb = typeof data.active_db === 'string' ? data.active_db : null
@@ -182,6 +224,7 @@
     }
   }
 
+  /** Drop the loaded file DB session on the server and return to an empty in-RAM trie. */
   async function unloadDb() {
     apiError = null
     keyFieldError = null
@@ -203,11 +246,8 @@
       }
       activeDb = null
       await refreshDbList()
-      // Back to stateless mode: clear UI state.
-      operations = []
-      steps = []
-      stepIndex = 0
-      return true
+      selectedDb = MEMORY_DB
+      return await replayToServer([])
     } finally {
       busy = false
     }
@@ -438,39 +478,39 @@
       class="mt-3 grid grid-cols-1 gap-4 md:grid-cols-2 md:items-start md:gap-x-6 md:gap-y-4"
     >
       <!-- Database: dropdown + buttons on one row; active status on the next row under the dropdown -->
-      <div class="flex min-w-0 flex-col gap-2 md:border-r md:border-(--border) md:pr-6">
-        <label class="text-xs font-medium text-(--muted)" for="dbsel">Database file</label>
-        <div class="flex flex-wrap items-end gap-2">
-          <select
-            id="dbsel"
-            class="min-w-40 max-w-full flex-1 rounded-lg border border-(--border) bg-(--bg) px-3 py-2 text-sm text-(--text) outline-none focus:border-(--accent) sm:max-w-xs"
-            bind:value={selectedDb}
-            disabled={busy || dbs.length === 0}
-          >
-            {#each dbs as name}
-              <option value={name}>{name}</option>
-            {/each}
-          </select>
-          <button
-            type="button"
-            class="shrink-0 rounded-lg border border-(--border) bg-(--surface) px-3 py-2 text-sm hover:border-(--accent) hover:bg-(--accent-dim) disabled:cursor-not-allowed disabled:opacity-50"
-            onclick={() => selectedDb && loadDb(selectedDb)}
-            disabled={busy || !!loadError || !selectedDb}
-          >
-            Load
-          </button>
-          <button
-            type="button"
-            class="shrink-0 rounded-lg border border-(--border) bg-(--surface) px-3 py-2 text-sm hover:border-(--accent) hover:bg-(--accent-dim) disabled:cursor-not-allowed disabled:opacity-50"
-            onclick={unloadDb}
-            disabled={busy || !!loadError || !activeDb}
-          >
-            Unload
-          </button>
+      <div class="flex min-w-0 w-full flex-col gap-2 md:border-r md:border-(--border) md:pr-6">
+        <div class="flex min-w-0 w-full flex-col gap-1">
+          <label class="text-xs font-medium text-(--muted)" for="dbsel">Database</label>
+          <div class="flex min-w-0 w-full flex-nowrap items-end gap-2">
+            <select
+              id="dbsel"
+              class="min-w-0 w-full flex-1 rounded-lg border border-(--border) bg-(--bg) px-3 py-2 text-sm text-(--text) outline-none focus:border-(--accent)"
+              bind:value={selectedDb}
+              onchange={onDbSelectChange}
+              disabled={busy || !!loadError}
+            >
+              <option value={MEMORY_DB}>None (empty in-RAM trie, non-persistent)</option>
+              {#each dbs as name}
+                <option value={name}>{name}</option>
+              {/each}
+            </select>
+            <button
+              type="button"
+              class="shrink-0 rounded-lg border border-(--border) bg-(--surface) px-3 py-2 text-sm hover:border-(--accent) hover:bg-(--accent-dim) disabled:cursor-not-allowed disabled:opacity-50"
+              onclick={unloadDb}
+              disabled={busy || !!loadError || !activeDb}
+            >
+              Unload
+            </button>
+          </div>
         </div>
         {#if activeDb}
           <p class="truncate text-xs leading-snug text-(--muted)" title={activeDb}>
             Active: <code class="text-(--text)">{activeDb}</code>
+          </p>
+        {:else}
+          <p class="text-xs leading-snug text-(--muted)">
+            Active: <code class="text-(--text)">None</code> (empty in-RAM trie, non-persistent)
           </p>
         {/if}
       </div>
@@ -612,7 +652,9 @@
       </div>
       <p class="mt-1 shrink-0 text-xs text-(--muted)">Click a step to show that trie state in the graph.</p>
       {#if steps.length === 0}
-        <p class="mt-2 flex-1 text-sm text-(--muted) md:min-h-0">No steps yet — run an operation or load a DB.</p>
+        <p class="mt-2 flex-1 text-sm text-(--muted) md:min-h-0">
+          No steps yet - run an operation or pick a database above.
+        </p>
       {:else}
         <ul
           class="mt-2 flex min-h-0 max-h-[70vh] flex-1 flex-col gap-1 overflow-y-auto pr-1 md:max-h-none"
@@ -649,6 +691,11 @@
         >
           {@html trieSvg}
         </div>
+      {:else if steps.length > 0 && !steps[stepIndex]?.dot}
+        <div
+          class="mt-3 min-h-[200px] rounded-lg border border-(--border) bg-white"
+          aria-label="Empty trie (no graph nodes)"
+        ></div>
       {:else if !loadError}
         <p class="mt-3 flex-1 text-sm text-(--muted) md:min-h-0">Graph appears after the first successful replay.</p>
       {/if}

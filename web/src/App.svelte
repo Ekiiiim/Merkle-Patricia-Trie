@@ -209,144 +209,229 @@
   }
 </script>
 
-<div class="page">
-  <header class="hero">
-    <h1>Merkle Patricia Trie</h1>
-    <p class="lede">
+<div class="mx-auto max-w-6xl px-6 py-5 pb-12">
+  <header>
+    <h1 class="text-2xl font-semibold tracking-tight">Merkle Patricia Trie</h1>
+    <p class="mt-1 max-w-3xl text-sm text-[var(--muted)]">
       Ethereum-style RLP + Keccak-256. Edit the trie below; scrub through each applied operation, then run a
       proof verification walkthrough.
     </p>
   </header>
 
   {#if loadError}
-    <p class="banner bad">Could not load Graphviz WASM: {loadError}</p>
+    <p class="mt-4 rounded-lg border border-[var(--bad)] bg-[var(--surface)] px-4 py-2 text-sm text-[var(--bad)]">
+      Could not load Graphviz WASM: {loadError}
+    </p>
   {/if}
 
   {#if apiError}
-    <p class="banner bad">{apiError}</p>
+    <p class="mt-4 rounded-lg border border-[var(--bad)] bg-[var(--surface)] px-4 py-2 text-sm text-[var(--bad)]">
+      {apiError}
+    </p>
   {/if}
 
-  <div class="grid">
-    <section class="panel">
-      <h2>Operations</h2>
-      <p class="hint">Keys and values are UTF-8 strings (same style as <code>demo.py</code>).</p>
+  <div class="mt-5 flex flex-wrap items-start gap-5">
+    <section class="flex-1 basis-[280px] rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
+      <h2 class="text-base font-semibold">Operations</h2>
+      <p class="mt-1 text-sm text-[var(--muted)]">
+        Keys and values are UTF-8 strings (same style as <code>demo.py</code>).
+      </p>
 
-      <div class="field">
-        <label for="key">Key</label>
-        <input id="key" type="text" bind:value={keyInput} disabled={busy} />
+      <div class="mt-3">
+        <label class="block text-xs font-medium text-[var(--muted)]" for="key">Key</label>
+        <input
+          class="mt-1 w-full max-w-64 rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
+          id="key"
+          type="text"
+          bind:value={keyInput}
+          disabled={busy}
+        />
       </div>
-      <div class="field">
-        <label for="val">Value (insert only)</label>
-        <input id="val" type="text" bind:value={valueInput} disabled={busy} />
+      <div class="mt-3">
+        <label class="block text-xs font-medium text-[var(--muted)]" for="val">Value (insert only)</label>
+        <input
+          class="mt-1 w-full max-w-64 rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
+          id="val"
+          type="text"
+          bind:value={valueInput}
+          disabled={busy}
+        />
       </div>
 
-      <div class="row-btns">
-        <button type="button" class="primary" onclick={insertOp} disabled={busy || !!loadError}>Insert</button>
-        <button type="button" onclick={deleteOp} disabled={busy || !!loadError}>Delete</button>
-        <button type="button" onclick={loadSample} disabled={busy || !!loadError}>Load sample</button>
-        <button type="button" onclick={resetAll} disabled={busy || !!loadError}>Reset</button>
+      <div class="mt-3 flex flex-wrap gap-2">
+        <button
+          type="button"
+          class="rounded-lg border border-transparent bg-[var(--accent)] px-3 py-2 text-sm font-semibold text-[#0f1219] hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+          onclick={insertOp}
+          disabled={busy || !!loadError}
+        >
+          Insert
+        </button>
+        <button
+          type="button"
+          class="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm hover:border-[var(--accent)] hover:bg-[var(--accent-dim)] disabled:cursor-not-allowed disabled:opacity-50"
+          onclick={deleteOp}
+          disabled={busy || !!loadError}
+        >
+          Delete
+        </button>
+        <button
+          type="button"
+          class="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm hover:border-[var(--accent)] hover:bg-[var(--accent-dim)] disabled:cursor-not-allowed disabled:opacity-50"
+          onclick={loadSample}
+          disabled={busy || !!loadError}
+        >
+          Load sample
+        </button>
+        <button
+          type="button"
+          class="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm hover:border-[var(--accent)] hover:bg-[var(--accent-dim)] disabled:cursor-not-allowed disabled:opacity-50"
+          onclick={resetAll}
+          disabled={busy || !!loadError}
+        >
+          Reset
+        </button>
       </div>
 
-      <h3>History</h3>
+      <h3 class="mt-4 text-sm font-semibold">History</h3>
       {#if operations.length === 0}
-        <p class="muted">No operations yet — trie is empty.</p>
+        <p class="mt-1 text-sm text-[var(--muted)]">No operations yet — trie is empty.</p>
       {:else}
-        <ol class="ops">
+        <ol class="mt-2 list-decimal pl-5 text-sm text-[var(--muted)]">
           {#each operations as o, i}
             <li>{opLabel(o, i)}</li>
           {/each}
         </ol>
       {/if}
 
-      <h3>Trie step</h3>
+      <h3 class="mt-4 text-sm font-semibold">Trie step</h3>
       {#if steps.length}
-        <p class="mono small">{steps[stepIndex]?.label}</p>
-        <p class="mono small root">state_root: {steps[stepIndex]?.state_root_hex}</p>
-        <div class="scrub">
+        <p class="mt-1 font-mono text-xs break-all text-[var(--muted)]">{steps[stepIndex]?.label}</p>
+        <p class="mt-1 font-mono text-xs break-all text-[var(--accent)]">
+          state_root: {steps[stepIndex]?.state_root_hex}
+        </p>
+        <div class="mt-2 flex flex-col gap-2">
           <input
+            class="w-full max-w-[420px]"
             type="range"
             min="0"
             max={steps.length - 1}
             bind:value={stepIndex}
             disabled={steps.length < 2}
           />
-          <div class="row-btns">
-            <button type="button" onclick={toggleTriePlay} disabled={steps.length < 2 || !!loadError}>
+          <div class="flex flex-wrap gap-2">
+            <button
+              type="button"
+              class="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm hover:border-[var(--accent)] hover:bg-[var(--accent-dim)] disabled:cursor-not-allowed disabled:opacity-50"
+              onclick={toggleTriePlay}
+              disabled={steps.length < 2 || !!loadError}
+            >
               {triePlaying ? 'Pause' : 'Play steps'}
             </button>
           </div>
         </div>
       {:else}
-        <p class="muted">Run an operation to see the trie.</p>
+        <p class="mt-1 text-sm text-[var(--muted)]">Run an operation to see the trie.</p>
       {/if}
     </section>
 
-    <section class="panel grow graph-panel">
-      <h2>Structure (Graphviz)</h2>
+    <section class="flex-[2_1_420px] rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 min-h-[280px]">
+      <h2 class="text-base font-semibold">Structure (Graphviz)</h2>
       {#if trieSvg}
-        <div class="graph-wrap">
+        <div class="graph-wrap mt-3 overflow-auto max-h-[70vh] rounded-lg bg-white p-2">
           {@html trieSvg}
         </div>
       {:else if !loadError}
-        <p class="muted">Graph appears after the first successful replay.</p>
+        <p class="mt-3 text-sm text-[var(--muted)]">Graph appears after the first successful replay.</p>
       {/if}
     </section>
   </div>
 
-  <section class="panel verify">
-    <h2>Root hash &amp; inclusion proof</h2>
-    <p class="hint">
+  <section class="mt-5 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
+    <h2 class="text-base font-semibold">Root hash &amp; inclusion proof</h2>
+    <p class="mt-1 text-sm text-[var(--muted)]">
       The state root is <code>keccak256(RLP(root_node))</code>. The walkthrough replays your history, builds a
       proof for the key below, and steps through <code>verify_inclusion</code> (embedded vs hashed child refs).
     </p>
 
-    <div class="field inline">
-      <label for="pk">Key to prove</label>
-      <input id="pk" type="text" bind:value={proveKey} disabled={busy} />
-      <button type="button" class="primary" onclick={runVerifyDemo} disabled={busy || !!loadError || operations.length === 0}>
+    <div class="mt-3 flex flex-wrap items-end gap-2">
+      <label class="block w-full text-xs font-medium text-[var(--muted)]" for="pk">Key to prove</label>
+      <input
+        class="w-full max-w-64 rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
+        id="pk"
+        type="text"
+        bind:value={proveKey}
+        disabled={busy}
+      />
+      <button
+        type="button"
+        class="rounded-lg border border-transparent bg-[var(--accent)] px-3 py-2 text-sm font-semibold text-[#0f1219] hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+        onclick={runVerifyDemo}
+        disabled={busy || !!loadError || operations.length === 0}
+      >
         Run verification walkthrough
       </button>
     </div>
 
     {#if verifyResult}
-      <div class="verify-summary">
-        <p class="mono small">state_root (keccak): <span class="break">{verifyResult.root_keccak_hex}</span></p>
-        <p class="mono small">root RLP (proof[0], hex): <span class="break">{verifyResult.root_rlp_hex}</span></p>
-        <p class="mono small">
-          value for <code>{verifyResult.prove_key}</code>: <span class="break">{verifyResult.value_hex}</span>
+      <div class="mt-3 rounded-lg border border-[var(--border)] bg-[var(--bg)] p-3">
+        <p class="font-mono text-xs break-all text-[var(--muted)]">
+          state_root (keccak): <span class="break-all">{verifyResult.root_keccak_hex}</span>
         </p>
-        <p class="mono small">proof nodes: {verifyResult.proof_nodes_hex.length}</p>
-        <p class="result {verifyResult.verified ? 'good' : 'bad'}">
+        <p class="mt-1 font-mono text-xs break-all text-[var(--muted)]">
+          root RLP (proof[0], hex): <span class="break-all">{verifyResult.root_rlp_hex}</span>
+        </p>
+        <p class="mt-1 font-mono text-xs break-all text-[var(--muted)]">
+          value for <code>{verifyResult.prove_key}</code>: <span class="break-all">{verifyResult.value_hex}</span>
+        </p>
+        <p class="mt-1 font-mono text-xs break-all text-[var(--muted)]">
+          proof nodes: {verifyResult.proof_nodes_hex.length}
+        </p>
+        <p class={`mt-2 font-bold ${verifyResult.verified ? 'text-[var(--good)]' : 'text-[var(--bad)]'}`}>
           Result: {verifyResult.verified ? 'VERIFIED' : 'FAILED'}
         </p>
       </div>
 
-      <h3>Verification steps</h3>
-      <div class="scrub">
+      <h3 class="mt-4 text-sm font-semibold">Verification steps</h3>
+      <div class="mt-2 flex flex-col gap-2">
         <input
+          class="w-full max-w-[420px]"
           type="range"
           min="0"
           max={verifyResult.verify_steps.length - 1}
           bind:value={verifyStepIndex}
           disabled={verifyResult.verify_steps.length < 2}
         />
-        <button type="button" onclick={toggleVerifyPlay} disabled={verifyResult.verify_steps.length < 2}>
+        <button
+          type="button"
+          class="w-fit rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm hover:border-[var(--accent)] hover:bg-[var(--accent-dim)] disabled:cursor-not-allowed disabled:opacity-50"
+          onclick={toggleVerifyPlay}
+          disabled={verifyResult.verify_steps.length < 2}
+        >
           {verifyPlaying ? 'Pause' : 'Play'}
         </button>
       </div>
 
       {#each verifyResult.verify_steps as s, i}
-        <article class="vstep" class:active={i === verifyStepIndex} class:bad={s.ok === false} class:good={s.ok === true}>
-          <h4>{s.title}</h4>
-          <p>{s.detail}</p>
+        <article
+          class={`my-2 rounded-lg border border-[var(--border)] p-3 opacity-60 ${
+            i === verifyStepIndex ? 'opacity-100 border-[var(--accent)] bg-[var(--accent-dim)]' : ''
+          } ${s.ok === true ? 'border-l-4 border-l-[var(--good)]' : ''} ${
+            s.ok === false ? 'border-l-4 border-l-[var(--bad)]' : ''
+          }`}
+        >
+          <h4 class="text-sm font-semibold">{s.title}</h4>
+          <p class="mt-1 text-sm text-[var(--muted)]">{s.detail}</p>
           {#if s.hash_hex}
-            <p class="mono tiny">hash: {s.hash_hex}</p>
+            <p class="mt-2 font-mono text-[11px] break-all text-[var(--muted)]">hash: {s.hash_hex}</p>
           {/if}
           {#if s.expected_state_root_hex}
-            <p class="mono tiny">expected state_root: {s.expected_state_root_hex}</p>
+            <p class="mt-2 font-mono text-[11px] break-all text-[var(--muted)]">
+              expected state_root: {s.expected_state_root_hex}
+            </p>
           {/if}
           {#if s.proof_index !== undefined}
-            <p class="mono tiny">proof index: {s.proof_index}</p>
+            <p class="mt-2 font-mono text-[11px] break-all text-[var(--muted)]">proof index: {s.proof_index}</p>
           {/if}
         </article>
       {/each}
@@ -355,150 +440,7 @@
 </div>
 
 <style>
-  .page {
-    max-width: 1200px;
-    margin: 0 auto;
-    padding: 1.25rem 1.5rem 3rem;
-  }
-
-  .hero h1 {
-    margin: 0 0 0.35rem;
-    font-size: 1.65rem;
-  }
-
-  .lede {
-    margin: 0;
-    color: var(--muted);
-    max-width: 52rem;
-  }
-
-  .banner {
-    padding: 0.65rem 1rem;
-    border-radius: 8px;
-    border: 1px solid var(--border);
-    background: var(--surface);
-  }
-
-  .banner.bad {
-    border-color: var(--bad);
-    color: var(--bad);
-  }
-
-  .grid {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 1.25rem;
-    margin-top: 1.25rem;
-    align-items: flex-start;
-  }
-
-  .panel {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 1rem 1.15rem;
-    flex: 1 1 280px;
-  }
-
-  .panel.grow {
-    flex: 2 1 420px;
-  }
-
-  .graph-panel {
-    min-height: 280px;
-  }
-
-  .panel h2 {
-    margin: 0 0 0.5rem;
-    font-size: 1.05rem;
-  }
-
-  .panel h3 {
-    margin: 1rem 0 0.35rem;
-    font-size: 0.95rem;
-  }
-
-  .hint {
-    margin: 0 0 0.85rem;
-    color: var(--muted);
-    font-size: 0.92rem;
-  }
-
-  .field {
-    margin-bottom: 0.65rem;
-  }
-
-  .field label {
-    display: block;
-    font-size: 0.85rem;
-    color: var(--muted);
-    margin-bottom: 0.2rem;
-  }
-
-  .field.inline {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.5rem;
-    align-items: flex-end;
-  }
-
-  .field.inline label {
-    flex: 0 0 100%;
-  }
-
-  .row-btns {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.45rem;
-    margin: 0.65rem 0;
-  }
-
-  .ops {
-    margin: 0;
-    padding-left: 1.2rem;
-    font-size: 0.9rem;
- color: var(--muted);
-  }
-
-  .muted {
-    color: var(--muted);
-    font-size: 0.92rem;
-  }
-
-  .mono {
-    font-family: var(--mono);
-  }
-
-  .small {
-    font-size: 0.82rem;
-    word-break: break-all;
-  }
-
-  .tiny {
-    font-size: 0.75rem;
-    word-break: break-all;
-    margin: 0.25rem 0 0;
-  }
-
-  .root {
-    color: var(--accent);
-  }
-
-  .scrub {
-    display: flex;
-    flex-direction: column;
-    gap: 0.45rem;
-    margin-top: 0.35rem;
-  }
-
-  .graph-wrap {
-    overflow: auto;
-    max-height: 70vh;
-    border-radius: 8px;
-    background: #fff;
-    padding: 0.5rem;
-  }
-
+  /* Graphviz output uses inline styles; keep a small global shim. */
   .graph-wrap :global(svg) {
     max-width: 100%;
     height: auto;
@@ -509,67 +451,5 @@
     color: #b91c1c;
     margin: 0;
     white-space: pre-wrap;
-  }
-
-  .verify {
-    margin-top: 1.25rem;
-  }
-
-  .verify-summary {
-    margin: 0.75rem 0;
-    padding: 0.65rem 0.85rem;
-    border-radius: 8px;
-    border: 1px solid var(--border);
-    background: var(--bg);
-  }
-
-  .break {
-    word-break: break-all;
-  }
-
-  .result {
-    font-weight: 700;
-    margin: 0.5rem 0 0;
-  }
-
-  .result.good {
-    color: var(--good);
-  }
-
-  .result.bad {
-    color: var(--bad);
-  }
-
-  .vstep {
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 0.55rem 0.75rem;
-    margin: 0.45rem 0;
-    opacity: 0.55;
-  }
-
-  .vstep.active {
-    opacity: 1;
-    border-color: var(--accent);
-    background: var(--accent-dim);
-  }
-
-  .vstep.good {
-    border-left: 3px solid var(--good);
-  }
-
-  .vstep.bad {
-    border-left: 3px solid var(--bad);
-  }
-
-  .vstep h4 {
-    margin: 0 0 0.25rem;
-    font-size: 0.88rem;
-  }
-
-  .vstep p {
-    margin: 0;
-    font-size: 0.88rem;
-    color: var(--muted);
   }
 </style>

@@ -16,6 +16,7 @@ dependencies = [
 [project.optional-dependencies]
 viz = ["matplotlib>=3.7"]
 web = ["fastapi>=0.100", "uvicorn[standard]>=0.22"]
+leveldb = ["plyvel>=1.5.0"]
 dev = ["pytest>=7.0", "matplotlib>=3.7"]
 
 [tool.setuptools.packages.find]

@@ -109,11 +109,22 @@
 
   async function refreshDbList() {
     try {
-      const { res, data } = await fetchJson<{ dbs?: string[]; active_db?: string | null }>('/api/db/list', undefined, 5000)
+      const { res, data } = await fetchJson<{
+        dbs?: string[]
+        active_db?: string | null
+        operations?: TrieOp[]
+        steps?: Step[]
+      }>('/api/db/list', undefined, 5000)
       if (res.ok) {
         dbs = data.dbs ?? []
         activeDb = typeof data.active_db === 'string' ? data.active_db : null
         if (!selectedDb) selectedDb = activeDb ?? (dbs[0] ?? '')
+        // Rehydrate trie graph + op history after full page reload while server still has a DB session.
+        if (activeDb && Array.isArray(data.steps) && data.steps.length > 0) {
+          operations = data.operations ?? []
+          steps = data.steps
+          stepIndex = Math.max(0, steps.length - 1)
+        }
       }
     } catch {
       // ignore; db selector is optional for demo
@@ -514,7 +525,7 @@
         type="button"
         class="rounded-lg border border-transparent bg-(--accent) px-3 py-2 text-sm font-semibold text-[#0f1219] hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
         onclick={runVerifyDemo}
-        disabled={busy || !!loadError || operations.length === 0}
+        disabled={busy || !!loadError || (!activeDb && operations.length === 0)}
       >
         Run verification walkthrough
       </button>

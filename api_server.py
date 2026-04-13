@@ -300,10 +300,40 @@ def verify_demo(body: VerifyDemoRequest) -> dict:
 
 @app.get("/api/db/list")
 def db_list() -> dict:
-    """List existing DBs under ./db and show current selection."""
+    """
+    List DB files, current session, and (when a DB is active) the operations + Graphviz
+    steps kept in memory so the SPA can rehydrate after a full page reload.
+    """
     with _state_lock:
         active = _active_db_name
-    return {"dbs": _list_db_names(), "active_db": active}
+        ops = list(_active_ops)
+        steps = list(_active_steps)
+
+    out: dict[str, object] = {"dbs": _list_db_names(), "active_db": active}
+
+    if active is None:
+        return out
+
+    # Rare: active DB but steps lost — rebuild step 0 from the DB file.
+    if not steps:
+        p = _db_path_for(active)
+        with PersistentMPT(str(p), create_if_missing=False) as pmpt:
+            snap = pmpt.trie.snapshot()
+            step0 = {
+                "label": f"0 — loaded DB ({active})",
+                "state_root_hex": pmpt.state_root().hex(),
+                "dot": trie_to_dot(snap, title=f"0 — loaded DB ({active})"),
+            }
+        with _state_lock:
+            _active_ops.clear()
+            _active_steps.clear()
+            _active_steps.append(step0)
+        ops = []
+        steps = [step0]
+
+    out["operations"] = [o.model_dump() for o in ops]
+    out["steps"] = steps
+    return out
 
 
 @app.post("/api/db/load")

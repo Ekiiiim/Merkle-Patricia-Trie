@@ -11,7 +11,7 @@ from mpt.ethereum import (
 )
 from mpt.nibbles import common_prefix_length, key_to_nibbles, nibbles_to_bytes
 from mpt.nodes import Branch, Extension, Leaf
-from mpt.proof import verify_inclusion
+from mpt.proof import verify_inclusion, verify_inclusion_trace
 from mpt.trie import MerklePatriciaTrie, snapshot_node
 from mpt.visualize import evolution_to_dot, trie_to_dot, try_matplotlib_show
 
@@ -37,4 +37,5 @@ __all__ = [
     "trie_to_dot",
     "try_matplotlib_show",
     "verify_inclusion",
+    "verify_inclusion_trace",
 ]

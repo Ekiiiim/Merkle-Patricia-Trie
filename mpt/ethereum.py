@@ -16,12 +16,12 @@ Matches execution-layer conventions:
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Callable, Optional
 
 import rlp
 
 from mpt.constants import EMPTY_TRIE_ROOT, keccak256
-from mpt.nodes import Branch, Extension, Leaf, Node
+from mpt.nodes import Branch, Extension, Leaf, HashNode, Node
 
 
 def encode_hex_prefix(nibbles: tuple[int, ...], is_leaf: bool) -> bytes:
@@ -63,6 +63,8 @@ def embed_ref(node: Optional[Node]) -> bytes:
     """
     if node is None:
         return b""
+    if isinstance(node, HashNode):
+        return node.hash
     raw = rlp_encode_node(node)
     if len(raw) < 32:
         return raw
@@ -86,6 +88,8 @@ def trie_root_hash(node: Optional[Node]) -> bytes:
     """32-byte state root (block header style)."""
     if node is None:
         return EMPTY_TRIE_ROOT
+    if isinstance(node, HashNode):
+        return node.hash
     return keccak256(rlp_encode_node(node))
 
 
@@ -96,6 +100,90 @@ def ref_matches_embedded(ref: bytes, child_rlp: bytes) -> bool:
     if len(child_rlp) < 32:
         return ref == child_rlp
     return ref == keccak256(child_rlp)
+
+
+def trie_root_hash(node: Optional[Node]) -> bytes:
+    if node is None:
+        return EMPTY_TRIE_ROOT
+    if isinstance(node, HashNode):
+        return node.hash
+    return keccak256(rlp_encode_node(node))
+
+def decode_trie_node(raw: bytes) -> Node:
+    """Decodes a raw RLP byte string into a functional MPT Node object.
+
+    This function implements the Ethereum node parsing logic by inspecting 
+    the structure of the RLP-decoded list:
+    - A list of length 2 represents either a Leaf or an Extension.
+    - A list of length 17 represents a Branch.
+
+    It also handles the critical 'embedded node' rule: if a child reference 
+    is shorter than 32 bytes, it is decoded immediately; otherwise, it is 
+    stored as a HashNode for lazy resolution.
+
+    Args:
+        raw: The RLP-encoded bytes of the trie node.
+
+    Returns:
+        Node: A Leaf, Extension, or Branch object.
+
+    Raises:
+        ValueError: If the RLP is malformed, not a list, or has an 
+            unsupported length.
+    """
+    try:
+        decoded = rlp.decode(raw)
+    except rlp.DecodingError as e:
+        raise ValueError("invalid trie RLP") from e
+    
+    if not isinstance(decoded, list):
+        raise ValueError("trie node must be an RLP list")
+
+    # Leaf or Extension
+    if len(decoded) == 2:
+        a, b = decoded[0], decoded[1]
+        nibbles, is_leaf = decode_hex_prefix(a)
+        
+        if is_leaf:
+            # Case 1: Leaf: Include path and value.
+            return Leaf(nibbles, b)
+        
+        # Case 2: Extension.
+        ref = b
+        if len(ref) < 32:
+            return Extension(nibbles, decode_trie_node(ref))
+        else:
+            return Extension(nibbles, HashNode(ref))
+
+    # Branch
+    if len(decoded) == 17:
+        children: list[Optional[Node]] = []
+        for i in range(16):
+            ref = decoded[i]
+            if not ref:
+                children.append(None)
+            elif len(ref) < 32:
+                children.append(decode_trie_node(ref))
+            else:
+                children.append(HashNode(ref))
+        
+        tail = decoded[16]
+        value: Optional[bytes] = None if tail == b"" else tail
+        return Branch(children, value)
+
+    raise ValueError(f"unsupported trie RLP list length {len(decoded)}")
+
+
+def load_root_from_rlp_store(
+    fetch_rlp: Callable[[bytes], Optional[bytes]], state_root: bytes
+) -> Optional[Node]:
+    """Return the in-memory root node for ``state_root``, or ``None`` if empty trie."""
+    if state_root == EMPTY_TRIE_ROOT:
+        return None
+    raw = fetch_rlp(state_root)
+    if raw is None:
+        raise ValueError("state root not found in store")
+    return decode_trie_node(raw)
 
 
 # Proof / API aliases

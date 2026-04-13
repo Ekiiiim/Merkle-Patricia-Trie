@@ -10,6 +10,7 @@ import functools
 from dataclasses import dataclass
 from typing import Optional
 
+from mpt.constants import keccak256
 from mpt.nibbles import common_prefix_length, key_to_nibbles
 from mpt.ethereum import embed_ref, encode_node, node_hash, decode_trie_node
 from mpt.nodes import Branch, Extension, Leaf, HashNode, Node
@@ -480,6 +481,14 @@ def _delete(node: Optional[Node], key: tuple[int, ...], db: Optional[TrieKVStore
     raise TypeError(f"Unexpected node type: {type(node).__name__}")
 
 
+def _key_to_path(key: bytes) -> tuple[int, ...]:
+    """
+    Ethereum-style state trie behavior: keys are hashed with keccak256 before
+    being expanded into nibbles for the hexary trie path.
+    """
+    return key_to_nibbles(keccak256(key))
+
+
 def _prove_walk(
     node: Optional[Node],
     key: tuple[int, ...],
@@ -679,7 +688,7 @@ class MerklePatriciaTrie:
             key: The raw byte key.
             value: The byte value to be stored.
         """
-        nib = key_to_nibbles(key)
+        nib = _key_to_path(key)
         self.root = _insert(self.root, nib, value, self.db)
 
     def lookup(self, key: bytes) -> Optional[bytes]:
@@ -692,7 +701,7 @@ class MerklePatriciaTrie:
             The stored value if the key exists; 
                 None otherwise.
         """
-        return _get(self.root, key_to_nibbles(key), self.db)
+        return _get(self.root, _key_to_path(key), self.db)
 
     def delete(self, key: bytes) -> bool:
         """Removes a key and its associated value from the trie.
@@ -703,7 +712,7 @@ class MerklePatriciaTrie:
         Returns:
             True if the key was found and removed; False otherwise.
         """
-        new_root, found = _delete(self.root, key_to_nibbles(key), self.db)
+        new_root, found = _delete(self.root, _key_to_path(key), self.db)
         if not found:
             return False
         self.root = new_root
@@ -723,7 +732,7 @@ class MerklePatriciaTrie:
                 (value, proof_nodes) if the key exists; None otherwise.
         """
         acc: list[bytes] = []
-        v = _prove_walk(self.root, key_to_nibbles(key), acc, db=self.db)
+        v = _prove_walk(self.root, _key_to_path(key), acc, db=self.db)
         if v is None:
             return None
         return v, acc

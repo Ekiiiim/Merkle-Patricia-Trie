@@ -8,10 +8,11 @@ Matches execution-layer conventions:
   * Trie **state root** is always **keccak256(RLP(root_node))**; empty trie uses
     ``keccak256(RLP(b''))`` → ``EMPTY_TRIE_ROOT``.
 
-**Intentional differences from mainnet state trie usage** (structure still matches):
-  * Keys are expanded from raw bytes to nibbles without ``keccak256(key)`` (Ethereum
-    state trie uses hashed keys; generic MPT / tests often use raw paths).
-  * Stored values are opaque ``bytes`` (state trie stores RLP(account)).
+Notes:
+  * This project follows the **mainnet state trie keying rule**: trie paths are
+    derived from ``keccak256(key)`` expanded into nibbles (hex digits).
+  * Stored values are still treated as opaque ``bytes`` (Ethereum state trie
+    commonly stores structured RLP payloads such as RLP(account)).
 """
 
 from __future__ import annotations

@@ -27,7 +27,8 @@ def verify_inclusion(
     if keccak256(proof[0]) != state_root:
         return False
 
-    rem = key_to_nibbles(key)
+    # Ethereum state trie uses keccak256(key) as the trie path material.
+    rem = key_to_nibbles(keccak256(key))
     i = 0
     raw = proof[i]
     i += 1
@@ -125,7 +126,8 @@ def verify_inclusion_trace(
         add("Failed", "keccak256(proof[0]) does not match the claimed state root.", ok=False)
         return False, steps
 
-    rem = key_to_nibbles(key)
+    # Ethereum state trie uses keccak256(key) as the trie path material.
+    rem = key_to_nibbles(keccak256(key))
     rem_hex = bytes(rem).hex()
     add(
         "Key path (nibbles)",

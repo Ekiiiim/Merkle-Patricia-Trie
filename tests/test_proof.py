@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from mpt import MerklePatriciaTrie, verify_inclusion
+from mpt import MerklePatriciaTrie, verify_inclusion, verify_inclusion_trace
 from mpt.constants import keccak256
 
 
@@ -66,3 +66,18 @@ def test_proof_fails_tampered_node() -> None:
     bad = list(proof)
     bad[-1] = bad[-1][:-1] + bytes([(bad[-1][-1] ^ 1) & 0xFF])
     assert not verify_inclusion(root, b"k", val, bad)
+
+
+def test_verify_inclusion_trace_matches_verify() -> None:
+    t = MerklePatriciaTrie()
+    for key, val in [(b"alice", b"100"), (b"bob", b"200"), (b"alma", b"300")]:
+        t.insert(key, val)
+    root = t.state_root()
+    for key in (b"alice", b"bob", b"alma"):
+        p = t.prove(key)
+        assert p is not None
+        val, proof = p
+        ok = verify_inclusion(root, key, val, proof)
+        ok_t, steps = verify_inclusion_trace(root, key, val, proof)
+        assert ok_t is ok
+        assert len(steps) >= 2

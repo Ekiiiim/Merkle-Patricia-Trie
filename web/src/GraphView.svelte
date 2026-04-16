@@ -8,16 +8,18 @@
 
   type TrieGraph = { nodes: any[]; edges: any[] }
 
-  const { graph, highlightPath = [], highlightCurrent = null } = $props<{
+  const { graph, highlightPath = [], highlightCurrent = null, selectedId = null } = $props<{
     graph: TrieGraph
     highlightPath?: string[]
     highlightCurrent?: string | null
+    selectedId?: string | null
   }>()
 
   const dispatch = createEventDispatcher<{ nodeclick: any }>()
 
   let el: HTMLDivElement | null = null
   let cy: Core | null = null
+  let selectedNodeId: string | null = null
 
   function buildElements(g: TrieGraph) {
     const nodes = (g?.nodes ?? []).map((n) => ({
@@ -50,13 +52,21 @@
 
   function relayout() {
     if (!cy) return
+    // Breadth-first layout is stable and supports explicit ordering.
+    // We order nodes by full trie path so screen position matches path prefix.
+    const roots = cy.nodes().filter((n) => n.indegree() === 0)
     cy.layout({
-      name: 'dagre',
-      rankDir: 'TB',
-      nodeSep: 24,
-      rankSep: 64,
-      edgeSep: 14,
+      name: 'breadthfirst',
+      directed: true,
       padding: 24,
+      spacingFactor: 1.15,
+      roots,
+      sort: (a: any, b: any) => {
+        const pa = String(a.data('path_nibbles_hex') ?? '')
+        const pb = String(b.data('path_nibbles_hex') ?? '')
+        if (pa !== pb) return pa.localeCompare(pb)
+        return String(a.id()).localeCompare(String(b.id()))
+      },
     } as any).run()
     cy.fit(undefined, 32)
   }
@@ -64,35 +74,32 @@
   function applyHighlights() {
     if (!cy) return
     const path = Array.isArray(highlightPath) ? highlightPath : []
-    const cur = typeof highlightCurrent === 'string' ? highlightCurrent : null
+    const propCurrent =
+      typeof highlightCurrent === 'string' && highlightCurrent ? highlightCurrent : null
+    const cur = path.length ? propCurrent : selectedNodeId ?? propCurrent
 
     cy.elements().removeClass('hl-path hl-current dim')
 
-    if (!path.length) return
+    // If there's neither a path nor a current node, nothing to highlight.
+    if (!path.length && !cur) return
 
-    // Dim everything, then undim the path.
-    cy.elements().addClass('dim')
-    for (const id of path) {
-      cy.getElementById(id).removeClass('dim').addClass('hl-path')
-    }
+    if (path.length) {
+      // Dim everything, then undim the path.
+      cy.elements().addClass('dim')
+      for (const id of path) {
+        cy.getElementById(id).removeClass('dim').addClass('hl-path')
+      }
 
-    // Edges along the path are src->dst for consecutive visited nodes.
-    for (let i = 0; i + 1 < path.length; i++) {
-      const eid = `${path[i]}->${path[i + 1]}`
-      cy.getElementById(eid).removeClass('dim').addClass('hl-path')
+      // Edges along the path are src->dst for consecutive visited nodes.
+      for (let i = 0; i + 1 < path.length; i++) {
+        const eid = `${path[i]}->${path[i + 1]}`
+        cy.getElementById(eid).removeClass('dim').addClass('hl-path')
+      }
     }
 
     if (cur) {
       const n = cy.getElementById(cur)
       n.removeClass('dim').addClass('hl-current')
-      // Small pulse animation to draw attention.
-      try {
-        n.stop()
-        n.animate({ style: { 'border-width': 10 } }, { duration: 120 })
-        n.animate({ style: { 'border-width': 4 } }, { duration: 260 })
-      } catch {
-        // ignore: animation not supported in some environments
-      }
     }
   }
 
@@ -102,6 +109,13 @@
     cy.elements().remove()
     cy.add([...nodes, ...edges])
     relayout()
+    applyHighlights()
+  })
+
+  $effect(() => {
+    if (!selectedId && !highlightCurrent && !(Array.isArray(highlightPath) && highlightPath.length)) {
+      selectedNodeId = null
+    }
     applyHighlights()
   })
 
@@ -184,15 +198,20 @@
         },
         {
           selector: '.hl-current',
-          style: {
-            'border-color': '#f59e0b',
-            'border-width': 6,
-          },
+          style:
+            {
+              'underlay-color': '#f59e0b',
+              'underlay-opacity': 0.22,
+              'underlay-padding': 10,
+              'underlay-shape': 'round-rectangle',
+            } as any,
         },
       ],
     })
 
     cy.on('tap', 'node', (evt) => {
+      selectedNodeId = evt.target.id()
+      applyHighlights()
       dispatch('nodeclick', evt.target.data())
     })
 

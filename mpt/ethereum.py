@@ -40,6 +40,16 @@ def encode_hex_prefix(nibbles: tuple[int, ...], is_leaf: bool) -> bytes:
     return bytes(out)
 
 
+def path_encoding(nibbles: tuple[int, ...], is_leaf: bool) -> bytes:
+    """Backwards-compatible alias for :func:`compact_encoding`."""
+    return compact_encoding(nibbles, is_leaf)
+
+
+def compact_encoding(nibbles: tuple[int, ...], is_leaf: bool) -> bytes:
+    """Readable name for Ethereum's hex-prefix (compact) encoding."""
+    return encode_hex_prefix(nibbles, is_leaf)
+
+
 def decode_hex_prefix(data: bytes) -> tuple[tuple[int, ...], bool]:
     """Decode compact path → (nibbles, is_leaf)."""
     if not data:
@@ -75,9 +85,9 @@ def embed_ref(node: Optional[Node]) -> bytes:
 def rlp_encode_node(node: Node) -> bytes:
     """Full RLP serialization of a non-None trie node."""
     if isinstance(node, Leaf):
-        return rlp.encode([encode_hex_prefix(node.path, True), node.value])
+        return rlp.encode([compact_encoding(node.path, True), node.value])
     if isinstance(node, Extension):
-        return rlp.encode([encode_hex_prefix(node.path, False), embed_ref(node.child)])
+        return rlp.encode([compact_encoding(node.path, False), embed_ref(node.child)])
     if isinstance(node, Branch):
         slots = [embed_ref(c) for c in node.children]
         val = node.value if node.value is not None else b""
@@ -146,8 +156,8 @@ def decode_trie_node(raw: bytes) -> Node:
         nibbles, is_leaf = decode_hex_prefix(a)
         
         if is_leaf:
-            # Case 1: Leaf: Include path and value.
-            return Leaf(nibbles, b)
+            # Case 1: Leaf: Include path and value. (Key preimage is not recoverable from RLP.)
+            return Leaf(nibbles, b, None)
         
         # Case 2: Extension.
         ref = b

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from mpt.constants import EMPTY_TRIE_ROOT, keccak256
-from mpt.ethereum import decode_hex_prefix, encode_hex_prefix, rlp_encode_node
+from mpt.ethereum import compact_encoding, decode_hex_prefix, encode_hex_prefix, rlp_encode_node
 from mpt.nodes import Leaf
 
 
@@ -15,7 +15,7 @@ def test_empty_trie_root_matches_mainnet_convention() -> None:
     )
 
 
-def test_hex_prefix_roundtrip_examples() -> None:
+def test_path_encoding_roundtrip_examples() -> None:
     for nibbles in (
         (),
         (1, 2, 3, 4),
@@ -23,7 +23,7 @@ def test_hex_prefix_roundtrip_examples() -> None:
         tuple(range(16)),
     ):
         for leaf in (False, True):
-            enc = encode_hex_prefix(nibbles, leaf)
+            enc = compact_encoding(nibbles, leaf)
             got, is_leaf = decode_hex_prefix(enc)
             assert got == nibbles and is_leaf == leaf
 

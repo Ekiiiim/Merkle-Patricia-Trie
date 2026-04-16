@@ -42,7 +42,7 @@ def snapshot_node(node: Optional[Node], db: Optional[TrieKVStore] = None) -> Opt
         return None
 
     if isinstance(node, Leaf):
-        return Leaf(node.path, node.value)
+        return Leaf(node.path, node.value, node.key)
     if isinstance(node, Extension):
         return Extension(node.path, snapshot_node(node.child, db))
     if isinstance(node, Branch):
@@ -81,7 +81,7 @@ def _prepend_nibble(nib: int, child: Node, db: Optional[TrieKVStore] = None) -> 
         return None
     if isinstance(child, Leaf):
         # Collapse (a.k.a Merge) path: Prepend nibble to the leaf's existing path.
-        return Leaf((nib,) + child.path, child.value)
+        return Leaf((nib,) + child.path, child.value, child.key)
     if isinstance(child, Extension):
         # Collapse (a.k.a Merge) path: Prepend with existing extension to maintain tree compactness.
         return Extension((nib,) + child.path, child.child)
@@ -109,7 +109,7 @@ def _merge_extension_path(prefix: tuple[int, ...], child: Node, db: Optional[Tri
     """
     child = _resolve(child, db)
     if isinstance(child, Leaf):
-        return Leaf(prefix + child.path, child.value)
+        return Leaf(prefix + child.path, child.value, child.key)
     if isinstance(child, Extension):
         return Extension(prefix + child.path, child.child)
     return Extension(prefix, child)
@@ -166,7 +166,14 @@ def _collapse_node(node: Optional[Node], db: Optional[TrieKVStore] = None) -> Op
     raise TypeError(node)
 
 
-def _insert(node: Optional[Node], key: tuple[int, ...], val: bytes, db: Optional[TrieKVStore] = None) -> Node:
+def _insert(
+    node: Optional[Node],
+    key: tuple[int, ...],
+    val: bytes,
+    db: Optional[TrieKVStore] = None,
+    *,
+    original_key: bytes | None = None,
+) -> Node:
     """Recursively inserts a key-value pair into the trie.
 
     This is the main entry point for the trie's insertion logic. It resolves 
@@ -191,17 +198,24 @@ def _insert(node: Optional[Node], key: tuple[int, ...], val: bytes, db: Optional
     """
     node = _resolve(node, db)
     if node is None:
-        return _collapse_node(Leaf(key, val), db)
+        return _collapse_node(Leaf(key, val, original_key), db)
     if isinstance(node, Leaf):
-        return _collapse_node(_insert_into_leaf(node, key, val, db), db)
+        return _collapse_node(_insert_into_leaf(node, key, val, db, original_key=original_key), db)
     if isinstance(node, Extension):
-        return _collapse_node(_insert_into_extension(node, key, val, db), db)
+        return _collapse_node(_insert_into_extension(node, key, val, db, original_key=original_key), db)
     if isinstance(node, Branch):
-        return _collapse_node(_insert_into_branch(node, key, val, db), db)
+        return _collapse_node(_insert_into_branch(node, key, val, db, original_key=original_key), db)
     raise TypeError(node)
 
 
-def _insert_into_leaf(leaf: Leaf, key: tuple[int, ...], val: bytes, db: Optional[TrieKVStore] = None) -> Node:
+def _insert_into_leaf(
+    leaf: Leaf,
+    key: tuple[int, ...],
+    val: bytes,
+    db: Optional[TrieKVStore] = None,
+    *,
+    original_key: bytes | None = None,
+) -> Node:
     """Handles insertion logic when the current node is a Leaf.
 
     This function compares the existing leaf's path with the insertion key and 
@@ -225,7 +239,7 @@ def _insert_into_leaf(leaf: Leaf, key: tuple[int, ...], val: bytes, db: Optional
 
     lp = leaf.path
     if lp == key:
-        return Leaf(lp, val)
+        return Leaf(lp, val, original_key if original_key is not None else leaf.key)
     cpl = common_prefix_length(lp, key)
 
     # Case 1: Strict prefix of existing leaf path: longer key extends `lp`.
@@ -233,7 +247,7 @@ def _insert_into_leaf(leaf: Leaf, key: tuple[int, ...], val: bytes, db: Optional
         suffix = tuple(key[cpl:])
         nxt = suffix[0]
         children = [None] * 16
-        children[nxt] = _insert(None, tuple(suffix[1:]), val, db)
+        children[nxt] = _insert(None, tuple(suffix[1:]), val, db, original_key=original_key)
         br = Branch(children, leaf.value)
         if cpl == 0:
             return br
@@ -243,7 +257,7 @@ def _insert_into_leaf(leaf: Leaf, key: tuple[int, ...], val: bytes, db: Optional
     if cpl == len(key) < len(lp):
         nxt = lp[cpl]
         children = [None] * 16
-        children[nxt] = _insert(None, tuple(lp[cpl + 1 :]), leaf.value, db)
+        children[nxt] = _insert(None, tuple(lp[cpl + 1 :]), leaf.value, db, original_key=leaf.key)
         br = Branch(children, val)
         if cpl == 0:
             return br
@@ -254,15 +268,22 @@ def _insert_into_leaf(leaf: Leaf, key: tuple[int, ...], val: bytes, db: Optional
     br = _empty_branch()
     a, b = lp[cpl], key[cpl]
     children = list(br.children)
-    children[a] = _insert(None, tuple(lp[cpl + 1 :]), leaf.value, db)
-    children[b] = _insert(None, tuple(key[cpl + 1 :]), val, db)
+    children[a] = _insert(None, tuple(lp[cpl + 1 :]), leaf.value, db, original_key=leaf.key)
+    children[b] = _insert(None, tuple(key[cpl + 1 :]), val, db, original_key=original_key)
     br = Branch(children, None)
     if cpl == 0:
         return br
     return Extension(common, br)
 
 
-def _insert_into_extension(ext: Extension, key: tuple[int, ...], val: bytes, db: Optional[TrieKVStore] = None) -> Node:
+def _insert_into_extension(
+    ext: Extension,
+    key: tuple[int, ...],
+    val: bytes,
+    db: Optional[TrieKVStore] = None,
+    *,
+    original_key: bytes | None = None,
+) -> Node:
     """Handles insertion logic when the current node is an Extension.
 
     This function compares the extension's path with the insertion key and 
@@ -290,7 +311,7 @@ def _insert_into_extension(ext: Extension, key: tuple[int, ...], val: bytes, db:
     # Case 1: Extension path is a complete prefix of the key.
     # We simply "pass through" this extension and insert into the child.
     if cpl == len(ep):
-        new_child = _insert(ext.child, tuple(key[cpl:]), val, db)
+        new_child = _insert(ext.child, tuple(key[cpl:]), val, db, original_key=original_key)
         return Extension(ep, new_child)
 
     # Case 2: Divergence - The extension path must be split.
@@ -310,7 +331,7 @@ def _insert_into_extension(ext: Extension, key: tuple[int, ...], val: bytes, db:
     children[tail_e] = ext.child if not rest_e else Extension(rest_e, ext.child)
 
     # Handle the new key's remnant
-    children[tail_k] = _insert(None, rest_k, val, db)
+    children[tail_k] = _insert(None, rest_k, val, db, original_key=original_key)
     br = Branch(children, None)
 
     # If there is no common prefix, the new Branch becomes the root of this subtree.
@@ -319,7 +340,14 @@ def _insert_into_extension(ext: Extension, key: tuple[int, ...], val: bytes, db:
     return Extension(common, br)
 
 
-def _insert_into_branch(br: Branch, key: tuple[int, ...], val: bytes, db: Optional[TrieKVStore] = None) -> Branch:
+def _insert_into_branch(
+    br: Branch,
+    key: tuple[int, ...],
+    val: bytes,
+    db: Optional[TrieKVStore] = None,
+    *,
+    original_key: bytes | None = None,
+) -> Branch:
     """Handles insertion logic when the current node is a Branch.
 
     A Branch node represents a 16-way junction (0-f). This function either:
@@ -348,7 +376,7 @@ def _insert_into_branch(br: Branch, key: tuple[int, ...], val: bytes, db: Option
 
     # Delegate the remaining path (key[1:]) to the appropriate child.
     # Note: _insert will handle resolving the child if it's currently a HashNode.
-    children[idx] = _insert(children[idx], tuple(key[1:]), val, db)
+    children[idx] = _insert(children[idx], tuple(key[1:]), val, db, original_key=original_key)
 
     # Return a new branch with the updated child, preserving the branch's original value.
     return Branch(children, br.value)
@@ -696,7 +724,7 @@ class MerklePatriciaTrie:
         if value is None:
             raise TypeError("insert value must not be None")
         nib = _key_to_path(key)
-        self.root = _insert(self.root, nib, value, self.db)
+        self.root = _insert(self.root, nib, value, self.db, original_key=key)
 
     def lookup(self, key: bytes) -> Optional[bytes]:
         """Retrieves the value associated with a key.

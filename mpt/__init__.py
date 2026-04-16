@@ -2,12 +2,14 @@
 
 from mpt.constants import EMPTY_TRIE_ROOT, h, keccak256
 from mpt.ethereum import (
+    compact_encoding,
     decode_hex_prefix,
     decode_trie_node,
     encode_hex_prefix,
     encode_node,
     load_root_from_rlp_store,
     node_hash,
+    path_encoding,
     rlp_encode_node,
     trie_root_hash,
 )
@@ -41,6 +43,7 @@ __all__ = [
     "TrieKVStore",
     "common_prefix_length",
     "commit_trie",
+    "compact_encoding",
     "decode_hex_prefix",
     "decode_trie_node",
     "encode_hex_prefix",
@@ -54,6 +57,7 @@ __all__ = [
     "load_trie_from_head",
     "nibbles_to_bytes",
     "node_hash",
+    "path_encoding",
     "open_persistent",
     "persist_trie",
     "rlp_encode_node",

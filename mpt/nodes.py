@@ -12,6 +12,8 @@ Node = Union["Branch", "Extension", "Leaf", "HashNode", None]
 class Leaf:
     path: tuple[int, ...]
     value: bytes
+    # Demo-only metadata: original preimage key bytes (not part of Ethereum node encoding).
+    key: bytes | None = None
 
 
 @dataclass(slots=True)

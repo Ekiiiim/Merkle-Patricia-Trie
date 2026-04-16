@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from mpt.ethereum import encode_node, node_hash
+from mpt.constants import keccak256
+from mpt.ethereum import compact_encoding, embed_ref, encode_hex_prefix, encode_node, node_hash, path_encoding
 from mpt.nodes import Branch, Extension, Leaf, Node
 
 
@@ -305,19 +306,29 @@ def trie_to_graph(root: Optional[Node]) -> dict[str, Any]:
             full_path = path_prefix + node.path
             row.update(
                 {
+                    "node_path_nibbles_hex": "0x" + _nibbles_hex(node.path),
+                    "compact_path_hex": compact_encoding(node.path, True).hex(),
                     "path_nibbles_hex": "0x" + _nibbles_hex(full_path),
+                    "key_utf8": (node.key.decode("utf-8", errors="replace") if getattr(node, "key", None) else None),
+                    "key_keccak_hex": (keccak256(node.key).hex() if getattr(node, "key", None) else None),
                     "value_utf8": node.value.decode("utf-8", errors="replace"),
                     "value_hex": node.value.hex(),
                 }
             )
         elif isinstance(node, Extension):
             full_path = path_prefix + node.path
+            ref = embed_ref(node.child)
             row.update(
                 {
+                    "node_path_nibbles_hex": "0x" + _nibbles_hex(node.path),
+                    "compact_path_hex": compact_encoding(node.path, False).hex(),
                     "path_nibbles_hex": "0x" + _nibbles_hex(full_path),
+                    "child_ref_hex": ref.hex(),
+                    "child_ref_kind": ("embedded" if 0 < len(ref) < 32 else "hash" if len(ref) == 32 else "empty"),
                 }
             )
         elif isinstance(node, Branch):
+            child_refs = [embed_ref(c) for c in node.children]
             if node.value is not None:
                 row.update(
                     {
@@ -325,6 +336,16 @@ def trie_to_graph(root: Optional[Node]) -> dict[str, Any]:
                         "terminal_value_utf8": node.value.decode("utf-8", errors="replace"),
                     }
                 )
+            row.update(
+                {
+                    "path_nibbles_hex": "0x" + _nibbles_hex(path_prefix),
+                    "child_refs_hex": [r.hex() for r in child_refs],
+                    "child_refs_kind": [
+                        ("empty" if len(r) == 0 else "embedded" if len(r) < 32 else "hash") for r in child_refs
+                    ],
+                    "value_slot_hex": (node.value.hex() if node.value is not None else ""),
+                }
+            )
         nodes.append(row)
         return hid
 
@@ -368,6 +389,7 @@ def trie_to_graph(root: Optional[Node]) -> dict[str, Any]:
                         "id": term_id,
                         "kind": "branch-terminal",
                         "label": "$",
+                        "path_nibbles_hex": "0x" + _nibbles_hex(prefix),
                         "value_hex": node.value.hex(),
                         "value_utf8": node.value.decode("utf-8", errors="replace"),
                         "hash_hex": None,

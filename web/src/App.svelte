@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import GraphView from './GraphView.svelte'
+  import ExpandableHex from './lib/ExpandableHex.svelte'
 
   type TrieOp = { op: 'insert' | 'delete'; key: string; value?: string }
   type TrieGraph = { nodes: any[]; edges: any[] }
@@ -63,8 +64,27 @@
   let verifyPlayTimer: ReturnType<typeof setInterval> | null = null
 
   let selectedGraphNode = $state<any | null>(null)
+  let selectedNodeId = $state<string | null>(null)
   let highlightPath = $state<string[]>([])
   let highlightCurrent = $state<string | null>(null)
+
+  function nibbleCountFromHexPrefix(x: unknown): number | null {
+    if (typeof x !== 'string') return null
+    const s = x.startsWith('0x') ? x.slice(2) : x
+    if (!/^[0-9a-fA-F]*$/.test(s)) return null
+    return s.length
+  }
+
+  function formatHexBytesSpaced(hex: unknown): string {
+    if (typeof hex !== 'string') return ''
+    const s = hex.startsWith('0x') ? hex.slice(2) : hex
+    if (!s) return ''
+    const cleaned = s.toLowerCase().replace(/[^0-9a-f]/g, '')
+    const pairs = cleaned.match(/.{1,2}/g) ?? []
+    return `0x${pairs.join(' ')}`
+  }
+
+  // Click-to-expand truncation lives in `ExpandableHex`.
 
   async function fetchJson<T>(url: string, init?: RequestInit, timeoutMs = 10_000): Promise<{ res: Response; data: T }> {
     const ctrl = new AbortController()
@@ -159,6 +179,7 @@
     verifyResult = null
     verifySectionError = null
     selectedGraphNode = null
+    selectedNodeId = null
     stopVerifyPlay()
     stopTriePlay()
     if (activeDb) {
@@ -192,6 +213,7 @@
     verifySectionError = null
     lookupResult = null
     selectedGraphNode = null
+    selectedNodeId = null
     stopVerifyPlay()
     stopTriePlay()
     busy = true
@@ -256,6 +278,7 @@
     apiError = null
     lookupResult = null
     selectedGraphNode = null
+    selectedNodeId = null
     busy = true
     try {
       const { res, data } = await fetchJson<{
@@ -336,6 +359,7 @@
     keyFieldError = null
     valueFieldError = null
     selectedGraphNode = null
+    selectedNodeId = null
     stopVerifyPlay()
     if (activeDb) {
       await loadDb(activeDb)
@@ -634,7 +658,7 @@
     class="mt-5 grid grid-cols-1 gap-5 md:grid-cols-[minmax(260px,1fr)_minmax(0,2fr)] md:items-stretch md:gap-5 md:min-h-[70vh]"
   >
     <section
-      class="flex min-h-[280px] min-w-0 flex-col rounded-xl border border-(--border) bg-(--surface) p-4 md:h-full md:min-h-0"
+      class="flex min-h-[280px] max-h-[70vh] min-w-0 flex-col overflow-hidden rounded-xl border border-(--border) bg-(--surface) p-4 md:h-full md:min-h-0"
     >
       <div class="flex shrink-0 flex-wrap items-start justify-between gap-2">
         <h2 class="text-base font-semibold">History</h2>
@@ -655,9 +679,7 @@
           No steps yet - run an operation or pick a database above.
         </p>
       {:else}
-        <ul
-          class="mt-2 flex min-h-0 max-h-[70vh] flex-1 flex-col gap-1 overflow-y-auto pr-1 md:max-h-none"
-        >
+        <ul class="mt-2 flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto pr-1">
           {#each steps as step, idx}
             <li class="list-none">
               <button
@@ -685,19 +707,23 @@
     >
       <h2 class="shrink-0 text-base font-semibold">Structure (interactive)</h2>
       {#if steps.length > 0 && steps[stepIndex]?.graph}
-        <div class="mt-3 min-h-[260px] flex-1 rounded-lg border border-(--border) bg-white md:min-h-0">
+        <div class="mt-3 min-h-[260px] max-h-[70vh] flex-1 overflow-hidden rounded-lg border border-(--border) bg-white md:min-h-0">
           {#key steps[stepIndex]?.state_root_hex}
             <GraphView
               graph={steps[stepIndex]!.graph!}
               highlightPath={highlightPath}
               highlightCurrent={highlightCurrent}
+              selectedId={selectedNodeId}
               on:nodeclick={(e: CustomEvent<any>) => {
+                const id = String(e.detail?.id ?? '')
+                selectedNodeId = id || null
                 selectedGraphNode = e.detail
               }}
             />
           {/key}
         </div>
         {#if selectedGraphNode}
+          {@const nodeUid = String(selectedGraphNode.id ?? selectedGraphNode.hash_hex ?? 'node')}
           <div class="mt-3 rounded-lg border border-(--border) bg-(--bg) p-3">
             <div class="flex items-start justify-between gap-3">
               <p class="text-sm font-semibold text-(--text)">Node details</p>
@@ -706,38 +732,127 @@
                 class="rounded-md border border-(--border) bg-(--surface) px-2 py-1 text-xs hover:border-(--accent) hover:bg-(--accent-dim)"
                 onclick={() => {
                   selectedGraphNode = null
+                  selectedNodeId = null
                 }}
               >
                 Close
               </button>
             </div>
+            <!-- 1. Summary -->
             <p class="mt-2 text-xs text-(--muted)">
               kind: <code class="text-(--text)">{selectedGraphNode.kind}</code>
-              {#if selectedGraphNode.hash_hex}
-                · hash: <code class="text-(--text) break-all">{selectedGraphNode.hash_hex}</code>
-              {/if}
             </p>
-            {#if selectedGraphNode.rlp_hex && selectedGraphNode.hash_hex}
-              <p class="mt-2 text-xs text-(--muted)">
-                hash calculation:
-                <code class="text-(--text)">keccak256(RLP(node))</code>
+            {#if selectedGraphNode.value_utf8}
+              <p class="mt-1 text-xs text-(--muted)">
+                value (UTF-8): <code class="text-(--text)">{selectedGraphNode.value_utf8}</code>
               </p>
-              <p class="mt-1 font-mono text-[11px] break-all text-(--muted)">
-                keccak256(0x{selectedGraphNode.rlp_hex}) = 0x{selectedGraphNode.hash_hex}
+            {/if}
+            {#if selectedGraphNode.kind === 'leaf' && selectedGraphNode.key_utf8}
+              <p class="mt-1 text-xs text-(--muted)">
+                key (UTF-8): <code class="text-(--text)">{selectedGraphNode.key_utf8}</code>
+              </p>
+            {/if}
+            {#if selectedGraphNode.kind === 'leaf' && selectedGraphNode.key_keccak_hex}
+              <p class="mt-1 text-xs text-(--muted)">
+                keccak256(key) (bytes): <code class="text-(--text) break-all">{formatHexBytesSpaced(selectedGraphNode.key_keccak_hex)}</code>
               </p>
             {/if}
             {#if selectedGraphNode.path_nibbles_hex}
-              <p class="mt-2 font-mono text-[11px] break-all text-(--muted)">path: {selectedGraphNode.path_nibbles_hex}</p>
+              <p class="mt-1 text-xs text-(--muted)">
+                {selectedGraphNode.kind === 'leaf' ? 'full path (nibbles):' : 'path (nibbles):'}
+                <code class="text-(--text) break-all">{selectedGraphNode.path_nibbles_hex}</code>
+              </p>
             {/if}
-            {#if selectedGraphNode.value_utf8}
-              <p class="mt-2 text-sm text-(--text)">value: <code>{selectedGraphNode.value_utf8}</code></p>
+            {#if selectedGraphNode.hash_hex}
+              <p class="mt-1 text-xs text-(--muted)">
+                hash: <code class="text-(--text) break-all">{selectedGraphNode.hash_hex}</code>
+              </p>
             {/if}
-            {#if selectedGraphNode.value_hex}
-              <p class="mt-2 font-mono text-[11px] break-all text-(--muted)">value_hex: {selectedGraphNode.value_hex}</p>
+
+            <!-- 2. Hash & RLP explanation (combined) -->
+            {#if selectedGraphNode.rlp_hex && selectedGraphNode.hash_hex}
+              <div class="mt-3">
+                <p class="text-xs font-semibold text-(--text)">How hash is computed</p>
+                <p class="mt-1 font-mono text-[11px] break-all text-(--muted)">
+                  hash = keccak256(RLP(node)) = keccak256(
+                  <ExpandableHex value={`0x${selectedGraphNode.rlp_hex}`} />
+                  ) = <ExpandableHex value={`0x${selectedGraphNode.hash_hex}`} />
+                </p>
+
+                {#if selectedGraphNode.kind === 'leaf'}
+                  <p class="mt-2 font-mono text-[11px] break-all text-(--muted)">
+                    RLP(node) = RLP([ compact_encoding(path, leaf), value ]) = RLP([
+                    <ExpandableHex value={`0x${selectedGraphNode.compact_path_hex ?? ''}`} />,
+                    <ExpandableHex value={`0x${selectedGraphNode.value_hex ?? ''}`} />
+                    ]) = <ExpandableHex value={`0x${selectedGraphNode.rlp_hex}`} />
+                  </p>
+                  {#if selectedGraphNode.node_path_nibbles_hex && selectedGraphNode.compact_path_hex}
+                    {@const nibs = String(selectedGraphNode.node_path_nibbles_hex)}
+                    {@const nNibs = nibbleCountFromHexPrefix(nibs) ?? 0}
+                    {@const odd = nNibs % 2}
+                    {@const flags = 2 + odd /* 2=leaf, +1 if odd */ }
+                    <p class="mt-1 font-mono text-[11px] break-all text-(--muted)">
+                      compact_encoding(path, leaf) = prepend(flags, remaining_path) = prepend({flags}, <ExpandableHex value={nibs} />) =
+                      <ExpandableHex value={`0x${selectedGraphNode.compact_path_hex}`} />
+                    </p>
+                    <p class="mt-1 text-xs text-(--muted)">
+                      flags = 2 (leaf) + {odd} (odd) = {flags} (high nibble of first byte)
+                    </p>
+                  {/if}
+                {:else if selectedGraphNode.kind === 'extension'}
+                  <p class="mt-2 text-xs text-(--muted)">
+                    child_ref is embedded RLP if &lt; 32 bytes, otherwise a 32-byte keccak hash.
+                  </p>
+                  <p class="mt-1 font-mono text-[11px] break-all text-(--muted)">
+                    RLP(node) = RLP([ compact_encoding(path, ext), child_ref ]) = RLP([
+                    <ExpandableHex value={`0x${selectedGraphNode.compact_path_hex ?? ''}`} />,
+                    <ExpandableHex value={`0x${selectedGraphNode.child_ref_hex ?? ''}`} />
+                    ]) = <ExpandableHex value={`0x${selectedGraphNode.rlp_hex}`} />
+                  </p>
+                  {#if selectedGraphNode.node_path_nibbles_hex && selectedGraphNode.compact_path_hex}
+                    {@const nibs = String(selectedGraphNode.node_path_nibbles_hex)}
+                    {@const nNibs = nibbleCountFromHexPrefix(nibs) ?? 0}
+                    {@const odd = nNibs % 2}
+                    {@const flags = 0 + odd /* 0=ext, +1 if odd */ }
+                    <p class="mt-1 font-mono text-[11px] break-all text-(--muted)">
+                      compact_encoding(path, ext) = prepend(flags, remaining_path) = prepend({flags}, <ExpandableHex value={nibs} />) =
+                      <ExpandableHex value={`0x${selectedGraphNode.compact_path_hex}`} />
+                    </p>
+                    <p class="mt-1 text-xs text-(--muted)">
+                      flags = 0 (ext) + {odd} (odd) = {flags} (high nibble of first byte)
+                    </p>
+                  {/if}
+                {:else if selectedGraphNode.kind === 'branch'}
+                  <p class="mt-2 font-mono text-[11px] break-all text-(--muted)">
+                    RLP(node) = RLP([ child0, …, child15, value ]) = <ExpandableHex value={`0x${selectedGraphNode.rlp_hex}`} />
+                  </p>
+                  <p class="mt-1 text-xs text-(--muted)">
+                    Each child slot is empty bytes, embedded RLP (&lt; 32), or a 32-byte hash; index 16 is the branch value.
+                  </p>
+                  {#if Array.isArray(selectedGraphNode.child_refs_hex) && Array.isArray(selectedGraphNode.child_refs_kind)}
+                    {@const refs: string[] = selectedGraphNode.child_refs_hex}
+                    {@const kinds: string[] = selectedGraphNode.child_refs_kind}
+                    <div class="mt-1 grid grid-cols-1 gap-1">
+                      {#each refs as r, idx (idx)}
+                        {#if r}
+                          <p class="font-mono text-[11px] break-all text-(--muted)">
+                            child[{idx.toString(16)}] ({kinds[idx]}):
+                            <ExpandableHex value={`0x${r}`} />
+                          </p>
+                        {/if}
+                      {/each}
+                    </div>
+                  {/if}
+                  <p class="mt-1 font-mono text-[11px] break-all text-(--muted)">
+                    value slot (index 16):
+                    <ExpandableHex value={`0x${selectedGraphNode.value_slot_hex ?? ''}`} />
+                  </p>
+                {:else}
+                  <p class="mt-2 text-xs text-(--muted)">No RLP breakdown for this synthetic node type.</p>
+                {/if}
+              </div>
             {/if}
-            {#if selectedGraphNode.rlp_hex}
-              <p class="mt-2 font-mono text-[11px] break-all text-(--muted)">rlp_hex: {selectedGraphNode.rlp_hex}</p>
-            {/if}
+
           </div>
         {/if}
       {:else}

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Optional
 
 from mpt.ethereum import encode_node, node_hash
 from mpt.nodes import Branch, Extension, Leaf, Node
@@ -272,3 +272,111 @@ def try_matplotlib_show(root: Optional[Node]) -> None:
     plt.axis("off")
     plt.tight_layout()
     plt.show()
+
+
+def trie_to_graph(root: Optional[Node]) -> dict[str, Any]:
+    """
+    Return a JSON-serializable graph representation of ``root``.
+
+    Node IDs are stable: ``keccak256(RLP(node))`` (same as ``node_hash(node)``).
+    This is designed for interactive frontends (Cytoscape, etc.).
+    """
+
+    nodes: list[dict[str, Any]] = []
+    edges: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    def add_node(node: Node, *, kind: str, path_prefix: tuple[int, ...]) -> str:
+        hid = node_hash(node).hex()
+        if hid in seen:
+            return hid
+        seen.add(hid)
+
+        # Common fields
+        row: dict[str, Any] = {
+            "id": hid,
+            "kind": kind,
+            "hash_hex": hid,
+            "rlp_hex": encode_node(node).hex(),
+        }
+
+        # Human-friendly extras per kind
+        if isinstance(node, Leaf):
+            full_path = path_prefix + node.path
+            row.update(
+                {
+                    "path_nibbles_hex": "0x" + _nibbles_hex(full_path),
+                    "value_utf8": node.value.decode("utf-8", errors="replace"),
+                    "value_hex": node.value.hex(),
+                }
+            )
+        elif isinstance(node, Extension):
+            full_path = path_prefix + node.path
+            row.update(
+                {
+                    "path_nibbles_hex": "0x" + _nibbles_hex(full_path),
+                }
+            )
+        elif isinstance(node, Branch):
+            if node.value is not None:
+                row.update(
+                    {
+                        "terminal_value_hex": node.value.hex(),
+                        "terminal_value_utf8": node.value.decode("utf-8", errors="replace"),
+                    }
+                )
+        nodes.append(row)
+        return hid
+
+    def add_edge(src: str, dst: str, *, label: str | None, kind: str) -> None:
+        eid = f"{src}->{dst}"
+        edges.append(
+            {
+                "id": eid,
+                "source": src,
+                "target": dst,
+                "label": label,
+                "kind": kind,
+            }
+        )
+
+    def walk(node: Optional[Node], prefix: tuple[int, ...]) -> Optional[str]:
+        if node is None:
+            return None
+        if isinstance(node, Leaf):
+            return add_node(node, kind="leaf", path_prefix=prefix)
+        if isinstance(node, Extension):
+            src = add_node(node, kind="extension", path_prefix=prefix)
+            full = prefix + node.path
+            cid = walk(node.child, full)
+            if cid is not None:
+                add_edge(src, cid, label=None, kind="child")
+            return src
+        if isinstance(node, Branch):
+            src = add_node(node, kind="branch", path_prefix=prefix)
+            for i, ch in enumerate(node.children):
+                if ch is None:
+                    continue
+                cid = walk(ch, prefix + (i,))
+                if cid is not None:
+                    add_edge(src, cid, label=f"{i:x}", kind="branch-child")
+            # Represent branch terminal value as a separate node for UI clarity.
+            if node.value is not None:
+                term_id = f"{src}:$"
+                nodes.append(
+                    {
+                        "id": term_id,
+                        "kind": "branch-terminal",
+                        "label": "$",
+                        "value_hex": node.value.hex(),
+                        "value_utf8": node.value.decode("utf-8", errors="replace"),
+                        "hash_hex": None,
+                        "rlp_hex": None,
+                    }
+                )
+                add_edge(src, term_id, label="$", kind="terminal")
+            return src
+        raise TypeError(node)
+
+    walk(root, ())
+    return {"nodes": nodes, "edges": edges}

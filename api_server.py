@@ -17,7 +17,13 @@ _ROOT = Path(__file__).resolve().parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from mpt import MerklePatriciaTrie, trie_to_dot, verify_inclusion, verify_inclusion_trace
+from mpt import (
+    MerklePatriciaTrie,
+    trie_to_dot,
+    trie_to_graph,
+    verify_inclusion,
+    verify_inclusion_trace,
+)
 from mpt.persistent import PersistentMPT
 from mpt.store import load_trie_from_head
 
@@ -187,6 +193,7 @@ def replay(body: ReplayRequest) -> dict:
                     "label": "0 - empty trie",
                     "state_root_hex": t.state_root().hex(),
                     "dot": trie_to_dot(t.snapshot(), title="0 - empty trie"),
+                    "graph": trie_to_graph(t.snapshot()),
                 }
             ]
             for idx, o in enumerate(body.operations):
@@ -207,6 +214,7 @@ def replay(body: ReplayRequest) -> dict:
                         "label": label,
                         "state_root_hex": t.state_root().hex(),
                         "dot": trie_to_dot(snap, title=label),
+                        "graph": trie_to_graph(snap),
                     }
                 )
             return {
@@ -247,6 +255,7 @@ def replay(body: ReplayRequest) -> dict:
                 "label": label,
                 "state_root_hex": pmpt.state_root().hex(),
                 "dot": trie_to_dot(snap, title=label),
+                "graph": trie_to_graph(snap),
             }
             with _state_lock:
                 _active_steps.append(step)
@@ -389,6 +398,7 @@ def db_list() -> dict:
                 "label": f"0 - loaded DB ({active})",
                 "state_root_hex": pmpt.state_root().hex(),
                 "dot": trie_to_dot(snap, title=f"0 - loaded DB ({active})"),
+                "graph": trie_to_graph(snap),
             }
         with _state_lock:
             _active_ops.clear()
@@ -417,6 +427,7 @@ def db_load(body: DbLoadRequest) -> dict:
             "label": f"0 - loaded DB ({body.db_name})",
             "state_root_hex": sr_hex,
             "dot": trie_to_dot(snap, title=f"0 - loaded DB ({body.db_name})"),
+            "graph": trie_to_graph(snap),
         }
 
     with _state_lock:

@@ -1,9 +1,10 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import type { Graphviz } from '@hpcc-js/wasm-graphviz'
+  import GraphView from './GraphView.svelte'
 
   type TrieOp = { op: 'insert' | 'delete'; key: string; value?: string }
-  type Step = { label: string; state_root_hex: string; dot: string }
+  type TrieGraph = { nodes: any[]; edges: any[] }
+  type Step = { label: string; state_root_hex: string; dot: string; graph?: TrieGraph }
   type VerifyStep = {
     title: string
     detail: string
@@ -11,16 +12,16 @@
     hash_hex?: string
     expected_state_root_hex?: string
     proof_index?: number
+    depth?: number
+    node_kind?: 'leaf' | 'extension' | 'branch'
+    node_hash_hex?: string
   }
 
   /** Synthetic DB row: in-RAM trie only (no SQLite file). Must not match real `db/*.db` names. */
   const MEMORY_DB = '__MPT_MEMORY__'
 
-  let gv: Graphviz | null = $state(null)
-  let loadError = $state<string | null>(null)
   let steps = $state<Step[]>([])
   let stepIndex = $state(0)
-  let trieSvg = $state('')
   let operations = $state<TrieOp[]>([])
   let apiError = $state<string | null>(null)
   let busy = $state(false)
@@ -61,6 +62,10 @@
   let triePlayTimer: ReturnType<typeof setInterval> | null = null
   let verifyPlayTimer: ReturnType<typeof setInterval> | null = null
 
+  let selectedGraphNode = $state<any | null>(null)
+  let highlightPath = $state<string[]>([])
+  let highlightCurrent = $state<string | null>(null)
+
   async function fetchJson<T>(url: string, init?: RequestInit, timeoutMs = 10_000): Promise<{ res: Response; data: T }> {
     const ctrl = new AbortController()
     const t = setTimeout(() => ctrl.abort(), timeoutMs)
@@ -74,15 +79,6 @@
   }
 
   onMount(() => {
-    void (async () => {
-      try {
-        const { Graphviz: G } = await import('@hpcc-js/wasm-graphviz')
-        gv = await G.load()
-      } catch (e) {
-        loadError = e instanceof Error ? e.message : String(e)
-      }
-    })()
-
     void (async () => {
       await refreshDbList()
       // Memory is default: show empty trie without requiring an insert first.
@@ -98,25 +94,20 @@
   })
 
   $effect(() => {
-    const engine = gv
-    const raw = steps[stepIndex]?.dot
-    const dot = typeof raw === 'string' ? raw.trim() : ''
-    if (!engine || !dot) {
-      trieSvg = ''
-      return
-    }
-    try {
-      // Use dot() (not layout()); some WASM builds misbehave on repeated layout() calls.
-      trieSvg = engine.dot(dot, 'svg')
-    } catch (e1) {
-      try {
-        trieSvg = engine.dot(dot, 'svg_inline')
-      } catch (e2) {
-        const m1 = e1 instanceof Error ? e1.message : String(e1)
-        const m2 = e2 instanceof Error ? e2.message : String(e2)
-        trieSvg = `<pre class="embed-err">Graphviz: ${m1}\n(retry svg_inline: ${m2})</pre>`
+    // Whenever we scrub the verification slider, update the highlighted path on the trie graph.
+    const all = verifyResult?.verify_steps ?? []
+    const idx = Math.max(0, Math.min(verifyStepIndex, Math.max(0, all.length - 1)))
+    const path: string[] = []
+    const seen = new Set<string>()
+    for (let i = 0; i <= idx; i++) {
+      const h = all[i]?.node_hash_hex
+      if (typeof h === 'string' && h && !seen.has(h)) {
+        seen.add(h)
+        path.push(h)
       }
     }
+    highlightPath = path
+    highlightCurrent = path.length ? path[path.length - 1] : null
   })
 
   function stopTriePlay() {
@@ -167,6 +158,7 @@
     apiError = null
     verifyResult = null
     verifySectionError = null
+    selectedGraphNode = null
     stopVerifyPlay()
     stopTriePlay()
     if (activeDb) {
@@ -199,6 +191,7 @@
     verifyResult = null
     verifySectionError = null
     lookupResult = null
+    selectedGraphNode = null
     stopVerifyPlay()
     stopTriePlay()
     busy = true
@@ -236,6 +229,7 @@
     verifyResult = null
     verifySectionError = null
     lookupResult = null
+    selectedGraphNode = null
     stopVerifyPlay()
     stopTriePlay()
     busy = true
@@ -261,6 +255,7 @@
   async function replayToServer(ops: TrieOp[]) {
     apiError = null
     lookupResult = null
+    selectedGraphNode = null
     busy = true
     try {
       const { res, data } = await fetchJson<{
@@ -340,6 +335,7 @@
     lookupResult = null
     keyFieldError = null
     valueFieldError = null
+    selectedGraphNode = null
     stopVerifyPlay()
     if (activeDb) {
       await loadDb(activeDb)
@@ -464,12 +460,6 @@
     <h1 class="text-2xl font-semibold tracking-tight">Merkle Patricia Trie</h1>
   </header>
 
-  {#if loadError}
-    <p class="mt-4 rounded-lg border border-(--bad) bg-(--surface) px-4 py-2 text-sm text-(--bad)">
-      Could not load Graphviz WASM: {loadError}
-    </p>
-  {/if}
-
   {#if apiError}
     <p class="mt-4 rounded-lg border border-(--bad) bg-(--surface) px-4 py-2 text-sm text-(--bad)">
       {apiError}
@@ -496,7 +486,7 @@
               class="min-w-0 w-full flex-1 rounded-lg border border-(--border) bg-(--bg) px-3 py-2 text-sm text-(--text) outline-none focus:border-(--accent)"
               bind:value={selectedDb}
               onchange={onDbSelectChange}
-              disabled={busy || !!loadError}
+              disabled={busy}
             >
               <option value={MEMORY_DB}>None (empty in-RAM trie, non-persistent)</option>
               {#each dbs as name}
@@ -507,7 +497,7 @@
               type="button"
               class="shrink-0 rounded-lg border border-(--border) bg-(--surface) px-3 py-2 text-sm hover:border-(--accent) hover:bg-(--accent-dim) disabled:cursor-not-allowed disabled:opacity-50"
               onclick={unloadDb}
-              disabled={busy || !!loadError || !activeDb}
+              disabled={busy || !activeDb}
             >
               Unload
             </button>
@@ -578,7 +568,7 @@
             type="button"
             class="rounded-lg border border-transparent bg-(--accent) px-3 py-2 text-sm font-semibold text-[#0f1219] hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
             onclick={insertOp}
-            disabled={busy || !!loadError}
+            disabled={busy}
           >
             Insert
           </button>
@@ -586,7 +576,7 @@
             type="button"
             class="rounded-lg border border-(--border) bg-(--surface) px-3 py-2 text-sm hover:border-(--accent) hover:bg-(--accent-dim) disabled:cursor-not-allowed disabled:opacity-50"
             onclick={deleteOp}
-            disabled={busy || !!loadError}
+            disabled={busy}
           >
             Delete
           </button>
@@ -594,7 +584,7 @@
             type="button"
             class="rounded-lg border border-(--border) bg-(--surface) px-3 py-2 text-sm hover:border-(--accent) hover:bg-(--accent-dim) disabled:cursor-not-allowed disabled:opacity-50"
             onclick={runLookup}
-            disabled={busy || !!loadError || !keyInput.trim()}
+            disabled={busy || !keyInput.trim()}
           >
             Lookup
           </button>
@@ -602,7 +592,7 @@
             type="button"
             class="rounded-lg border border-(--border) bg-(--surface) px-3 py-2 text-sm hover:border-(--accent) hover:bg-(--accent-dim) disabled:cursor-not-allowed disabled:opacity-50"
             onclick={loadSample}
-            disabled={busy || !!loadError}
+            disabled={busy}
           >
             Sample
           </button>
@@ -610,7 +600,7 @@
             type="button"
             class="rounded-lg border border-(--border) bg-(--surface) px-3 py-2 text-sm hover:border-(--accent) hover:bg-(--accent-dim) disabled:cursor-not-allowed disabled:opacity-50"
             onclick={resetAll}
-            disabled={busy || !!loadError}
+            disabled={busy}
           >
             Reset
           </button>
@@ -653,7 +643,7 @@
             type="button"
             class="shrink-0 rounded-lg border border-(--border) bg-(--surface) px-3 py-2 text-sm hover:border-(--accent) hover:bg-(--accent-dim) disabled:cursor-not-allowed disabled:opacity-50"
             onclick={toggleTriePlay}
-            disabled={busy || !!loadError}
+            disabled={busy}
           >
             {triePlaying ? 'Pause' : 'Play steps'}
           </button>
@@ -676,7 +666,7 @@
                   ? 'border-(--accent) bg-(--accent-dim) text-(--text)'
                   : 'border-(--border) bg-(--surface) text-(--muted) hover:border-(--accent) hover:bg-(--accent-dim)'}"
                 onclick={() => goToTrieStep(idx)}
-                disabled={busy || !!loadError}
+                disabled={busy}
                 aria-pressed={stepIndex === idx}
               >
                 <span class="block font-medium text-(--text)">{step.label}</span>
@@ -693,20 +683,65 @@
     <section
       class="flex min-h-[280px] min-w-0 flex-col rounded-xl border border-(--border) bg-(--surface) p-4 md:h-full md:min-h-0"
     >
-      <h2 class="shrink-0 text-base font-semibold">Structure (Graphviz)</h2>
-      {#if trieSvg}
-        <div
-          class="graph-wrap mt-3 max-h-[70vh] min-h-0 flex-1 overflow-auto rounded-lg bg-white p-2 md:max-h-none"
-        >
-          {@html trieSvg}
+      <h2 class="shrink-0 text-base font-semibold">Structure (interactive)</h2>
+      {#if steps.length > 0 && steps[stepIndex]?.graph}
+        <div class="mt-3 min-h-[260px] flex-1 rounded-lg border border-(--border) bg-white md:min-h-0">
+          {#key steps[stepIndex]?.state_root_hex}
+            <GraphView
+              graph={steps[stepIndex]!.graph!}
+              highlightPath={highlightPath}
+              highlightCurrent={highlightCurrent}
+              on:nodeclick={(e: CustomEvent<any>) => {
+                selectedGraphNode = e.detail
+              }}
+            />
+          {/key}
         </div>
-      {:else if steps.length > 0 && !steps[stepIndex]?.dot}
-        <div
-          class="mt-3 min-h-[200px] rounded-lg border border-(--border) bg-white"
-          aria-label="Empty trie (no graph nodes)"
-        ></div>
-      {:else if !loadError}
-        <p class="mt-3 flex-1 text-sm text-(--muted) md:min-h-0">Graph appears after the first successful replay.</p>
+        {#if selectedGraphNode}
+          <div class="mt-3 rounded-lg border border-(--border) bg-(--bg) p-3">
+            <div class="flex items-start justify-between gap-3">
+              <p class="text-sm font-semibold text-(--text)">Node details</p>
+              <button
+                type="button"
+                class="rounded-md border border-(--border) bg-(--surface) px-2 py-1 text-xs hover:border-(--accent) hover:bg-(--accent-dim)"
+                onclick={() => {
+                  selectedGraphNode = null
+                }}
+              >
+                Close
+              </button>
+            </div>
+            <p class="mt-2 text-xs text-(--muted)">
+              kind: <code class="text-(--text)">{selectedGraphNode.kind}</code>
+              {#if selectedGraphNode.hash_hex}
+                · hash: <code class="text-(--text) break-all">{selectedGraphNode.hash_hex}</code>
+              {/if}
+            </p>
+            {#if selectedGraphNode.rlp_hex && selectedGraphNode.hash_hex}
+              <p class="mt-2 text-xs text-(--muted)">
+                hash calculation:
+                <code class="text-(--text)">keccak256(RLP(node))</code>
+              </p>
+              <p class="mt-1 font-mono text-[11px] break-all text-(--muted)">
+                keccak256(0x{selectedGraphNode.rlp_hex}) = 0x{selectedGraphNode.hash_hex}
+              </p>
+            {/if}
+            {#if selectedGraphNode.path_nibbles_hex}
+              <p class="mt-2 font-mono text-[11px] break-all text-(--muted)">path: {selectedGraphNode.path_nibbles_hex}</p>
+            {/if}
+            {#if selectedGraphNode.value_utf8}
+              <p class="mt-2 text-sm text-(--text)">value: <code>{selectedGraphNode.value_utf8}</code></p>
+            {/if}
+            {#if selectedGraphNode.value_hex}
+              <p class="mt-2 font-mono text-[11px] break-all text-(--muted)">value_hex: {selectedGraphNode.value_hex}</p>
+            {/if}
+            {#if selectedGraphNode.rlp_hex}
+              <p class="mt-2 font-mono text-[11px] break-all text-(--muted)">rlp_hex: {selectedGraphNode.rlp_hex}</p>
+            {/if}
+          </div>
+        {/if}
+      {:else}
+        <div class="mt-3 min-h-[200px] rounded-lg border border-(--border) bg-white" aria-label="Empty trie"></div>
       {/if}
     </section>
   </div>
@@ -731,7 +766,7 @@
         type="button"
         class="rounded-lg border border-transparent bg-(--accent) px-3 py-2 text-sm font-semibold text-[#0f1219] hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
         onclick={runVerifyDemo}
-        disabled={busy || !!loadError || (!activeDb && operations.length === 0)}
+        disabled={busy || (!activeDb && operations.length === 0)}
       >
         Run verification walkthrough
       </button>
@@ -813,16 +848,4 @@
 </div>
 
 <style>
-  /* Graphviz output uses inline styles; keep a small global shim. */
-  .graph-wrap :global(svg) {
-    max-width: 100%;
-    height: auto;
-    display: block;
-  }
-
-  .graph-wrap :global(.embed-err) {
-    color: #b91c1c;
-    margin: 0;
-    white-space: pre-wrap;
-  }
 </style>

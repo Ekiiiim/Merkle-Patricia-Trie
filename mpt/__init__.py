@@ -26,7 +26,7 @@ from mpt.store import (
     persist_trie,
 )
 from mpt.trie import MerklePatriciaTrie, snapshot_node
-from mpt.visualize import evolution_to_dot, trie_to_dot, try_matplotlib_show
+from mpt.visualize import evolution_to_dot, trie_to_dot, trie_to_graph, try_matplotlib_show
 
 __all__ = [
     "Branch",
@@ -60,6 +60,7 @@ __all__ = [
     "snapshot_node",
     "trie_root_hash",
     "trie_to_dot",
+    "trie_to_graph",
     "try_matplotlib_show",
     "verify_inclusion",
     "verify_inclusion_trace",

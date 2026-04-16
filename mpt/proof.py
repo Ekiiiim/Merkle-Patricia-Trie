@@ -140,6 +140,7 @@ def verify_inclusion_trace(
     depth = 0
 
     while True:
+        cur_hash_hex = keccak256(raw).hex()
         try:
             node = rlp.decode(raw)
         except rlp.DecodingError as e:
@@ -160,6 +161,9 @@ def verify_inclusion_trace(
                 add(
                     f"Depth {depth}: leaf node",
                     f"Compact path nibbles (hex): {path_hex}; compare to remaining path.",
+                    depth=depth,
+                    node_kind="leaf",
+                    node_hash_hex=cur_hash_hex,
                 )
                 match = nibbles == tuple(rem) and node[1] == value
                 add(
@@ -179,6 +183,9 @@ def verify_inclusion_trace(
             add(
                 f"Depth {depth}: extension node",
                 f"Shared path ({pl} nibbles, hex): {path_hex}; descend if key has this prefix.",
+                depth=depth,
+                node_kind="extension",
+                node_hash_hex=cur_hash_hex,
             )
             if len(rem) < pl or tuple(rem[:pl]) != nibbles:
                 add(
@@ -228,6 +235,9 @@ def verify_inclusion_trace(
                 add(
                     f"Depth {depth}: branch (terminal value)",
                     "Key exhausted at branch: value is in slot 16.",
+                depth=depth,
+                node_kind="branch",
+                node_hash_hex=cur_hash_hex,
                 )
                 ok = node[16] == value
                 add(
@@ -248,6 +258,9 @@ def verify_inclusion_trace(
             add(
                 f"Depth {depth}: branch node",
                 f"Next nibble {n:x} - follow child slot {n:x}.",
+                depth=depth,
+                node_kind="branch",
+                node_hash_hex=cur_hash_hex,
             )
             ref = node[n]
             if not ref:

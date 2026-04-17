@@ -24,6 +24,18 @@
   /** Synthetic DB row: in-RAM trie only (no SQLite file). Must not match real `db/*.db` names. */
   const MEMORY_DB = '__MPT_MEMORY__'
 
+  // For GitHub Pages (static hosting), the frontend can still talk to a separately-hosted API.
+  // Examples:
+  // - local dev:    (empty) + Vite proxy handles `/api/*`
+  // - prod (remote): VITE_API_BASE="https://your-api.example.com"
+  const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined)?.replace(/\/+$/, '') ?? ''
+
+  function apiUrl(path: string): string {
+    if (/^https?:\/\//i.test(path)) return path
+    if (!path.startsWith('/')) path = `/${path}`
+    return `${API_BASE}${path}`
+  }
+
   let steps = $state<Step[]>([])
   let stepIndex = $state(0)
   let operations = $state<TrieOp[]>([])
@@ -103,7 +115,7 @@
     const ctrl = new AbortController()
     const t = setTimeout(() => ctrl.abort(), timeoutMs)
     try {
-      const res = await fetch(url, { ...init, signal: ctrl.signal })
+      const res = await fetch(apiUrl(url), { ...init, signal: ctrl.signal })
       const data = (await res.json().catch(() => ({}))) as T
       return { res, data }
     } finally {

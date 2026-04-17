@@ -56,7 +56,7 @@ def test_proof_valid_after_load() -> None:
 def test_sqlite_roundtrip(tmp_path: str = "./db") -> None:
     from mpt.persistent import PersistentMPT
 
-    path = str(Path(tmp_path) / "test_mpt.db")
+    path = str(Path(tmp_path) / "test_mpt_rocks")
     
     with PersistentMPT(path) as db:
         db.insert(b"a", b"1")
@@ -74,7 +74,7 @@ def test_sqlite_roundtrip2(tmp_path: str = "./db") -> None:
 
     print(f'tmp_path = {tmp_path}')
 
-    path = str(Path(tmp_path) / "test_mpt.db")
+    path = str(Path(tmp_path) / "test_mpt_rocks")
     
 
     with PersistentMPT(path) as db2:
@@ -87,7 +87,7 @@ def test_large_random_dataset(tmp_path: str = './db') -> None:
     import time
     from mpt.persistent import PersistentMPT
 
-    path = str(Path(tmp_path) / "stress.db")
+    path = str(Path(tmp_path) / "stress_rocks")
     
     data = {}
     for _ in range(10000):

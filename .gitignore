@@ -32,3 +32,8 @@ demo_steps.dot
 demo_trie.dot
 demo_steps.png
 demo_trie.png
+
+# Local persistent stores under ./db (RocksDB dirs, WAL/logs, SSTs, locks, legacy *.db)
+# Keep the empty folder via db/.gitkeep.
+db/*
+!db/.gitkeep

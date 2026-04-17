@@ -1,0 +1,1 @@
+# Keeps ./db in the repository; all real database files are ignored (see root .gitignore).

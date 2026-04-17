@@ -14,6 +14,9 @@ export default defineConfig(() => {
 
   return {
     base,
+    build: {
+      chunkSizeWarningLimit: 700,
+    },
     plugins: [tailwindcss(), svelte()],
     server: {
       proxy: {

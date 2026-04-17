@@ -33,7 +33,12 @@ demo_trie.dot
 demo_steps.png
 demo_trie.png
 
-# Local persistent stores under ./db (RocksDB dirs, WAL/logs, SSTs, locks, legacy *.db)
-# Keep the empty folder via db/.gitkeep.
-db/*
-!db/.gitkeep
+# ./db/<name>/ — RocksDB / rocksdict stores
+# Track data + catalog files: *.sst, CURRENT, MANIFEST-*, OPTIONS-*, IDENTITY, rocksdict-config.json
+# Ignore only runtime / machine-local noise (do NOT ignore *.sst):
+db/**/LOCK
+db/**/LOG
+db/**/LOG.old.*
+db/**/*.log
+# Legacy SQLite files at db root
+db/*.db

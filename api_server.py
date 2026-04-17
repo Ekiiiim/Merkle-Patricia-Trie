@@ -287,7 +287,7 @@ def verify_demo(body: VerifyDemoRequest) -> dict:
         if val is None:
             raise HTTPException(
                 status_code=400,
-                detail=f"Key not in trie after replay ({body.prove_key!r})",
+                detail=f"Key ({body.prove_key!r}) not in trie",
             )
         proved = t.prove(key_b)
         if proved is None:
@@ -300,6 +300,7 @@ def verify_demo(body: VerifyDemoRequest) -> dict:
         return {
             "state_root_hex": root.hex(),
             "prove_key": body.prove_key,
+            "value_utf8": val.decode("utf-8", errors="replace"),
             "value_hex": val.hex(),
             "proof_nodes_hex": [p.hex() for p in proof],
             "verify_steps": trace_steps,
@@ -363,6 +364,7 @@ def verify_demo(body: VerifyDemoRequest) -> dict:
         return {
             "state_root_hex": root.hex(),
             "prove_key": body.prove_key,
+            "value_utf8": val.decode("utf-8", errors="replace"),
             "value_hex": val.hex(),
             "proof_nodes_hex": [p.hex() for p in proof],
             "verify_steps": trace_steps,

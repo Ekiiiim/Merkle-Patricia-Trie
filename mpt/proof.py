@@ -131,7 +131,10 @@ def verify_inclusion_trace(
     rem_hex = bytes(rem).hex()
     add(
         "Key path (nibbles)",
-        f"Key expanded to {len(rem)} nibbles (hex pairs): {rem_hex}",
+        f"Key expanded to {len(rem)} nibbles (hex pairs).",
+        n_nibbles=len(rem),
+        key_path_nibbles_hex=rem_hex,
+        detail_hexes=[{"label": "path", "hex": rem_hex}],
     )
 
     i = 0
@@ -160,10 +163,11 @@ def verify_inclusion_trace(
             if is_leaf:
                 add(
                     f"Depth {depth}: leaf node",
-                    f"Compact path nibbles (hex): {path_hex}; compare to remaining path.",
+                    "Compact path nibbles (hex); compare to remaining path.",
                     depth=depth,
                     node_kind="leaf",
                     node_hash_hex=cur_hash_hex,
+                    detail_hexes=[{"label": "path", "hex": path_hex}],
                 )
                 match = nibbles == tuple(rem) and node[1] == value
                 add(
@@ -182,10 +186,11 @@ def verify_inclusion_trace(
             pl = len(nibbles)
             add(
                 f"Depth {depth}: extension node",
-                f"Shared path ({pl} nibbles, hex): {path_hex}; descend if key has this prefix.",
+                f"Shared path ({pl} nibbles, hex); descend if key has this prefix.",
                 depth=depth,
                 node_kind="extension",
                 node_hash_hex=cur_hash_hex,
+                detail_hexes=[{"label": "path", "hex": path_hex}],
             )
             if len(rem) < pl or tuple(rem[:pl]) != nibbles:
                 add(
@@ -242,8 +247,9 @@ def verify_inclusion_trace(
                 ok = node[16] == value
                 add(
                     "Terminal value check",
-                    f"Slot 16 must equal claimed value (hex): {value.hex()}",
+                    "Slot 16 must equal claimed value (hex).",
                     ok=ok,
+                    detail_hexes=[{"label": "value", "hex": value.hex()}],
                 )
                 if ok:
                     add(

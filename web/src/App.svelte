@@ -14,6 +14,9 @@
     expected_state_root_hex?: string
     proof_index?: number
     depth?: number
+    n_nibbles?: number
+    key_path_nibbles_hex?: string
+    detail_hexes?: { label: string; hex: string }[]
     node_kind?: 'leaf' | 'extension' | 'branch'
     node_hash_hex?: string
   }
@@ -40,6 +43,7 @@
   let verifyResult = $state<null | {
     state_root_hex: string
     prove_key: string
+    value_utf8: string | null
     value_hex: string
     proof_nodes_hex: string[]
     verify_steps: VerifyStep[]
@@ -59,9 +63,11 @@
   let verifyStepIndex = $state(0)
   let triePlaying = $state(false)
   let verifyPlaying = $state(false)
+  let historyPanelTab = $state<'history' | 'verification'>('history')
 
   let triePlayTimer: ReturnType<typeof setInterval> | null = null
   let verifyPlayTimer: ReturnType<typeof setInterval> | null = null
+  let verifyStepsScrollEl = $state<HTMLDivElement | null>(null)
 
   let selectedGraphNode = $state<any | null>(null)
   let selectedNodeId = $state<string | null>(null)
@@ -82,6 +88,13 @@
     const cleaned = s.toLowerCase().replace(/[^0-9a-f]/g, '')
     const pairs = cleaned.match(/.{1,2}/g) ?? []
     return `0x${pairs.join(' ')}`
+  }
+
+  function as0xHex(hex: unknown): string {
+    if (typeof hex !== 'string') return ''
+    const s = hex.trim()
+    if (!s) return ''
+    return s.startsWith('0x') ? s : `0x${s}`
   }
 
   // Click-to-expand truncation lives in `ExpandableHex`.
@@ -128,6 +141,17 @@
     }
     highlightPath = path
     highlightCurrent = path.length ? path[path.length - 1] : null
+  })
+
+  $effect(() => {
+    // In play mode, keep the currently-selected verification step visible.
+    if (historyPanelTab !== 'verification') return
+    if (!verifyPlaying) return
+    if (!verifyStepsScrollEl) return
+    if (!verifyResult?.verify_steps?.length) return
+    const idx = Math.max(0, Math.min(verifyStepIndex, verifyResult.verify_steps.length - 1))
+    const el = verifyStepsScrollEl.querySelector<HTMLElement>(`[data-verify-step="${idx}"]`)
+    el?.scrollIntoView({ block: 'nearest' })
   })
 
   function stopTriePlay() {
@@ -332,7 +356,10 @@
     keyFieldError = null
     valueFieldError = null
     const k = keyInput.trim()
-    if (!k) return
+    if (!k) {
+      keyFieldError = 'Key is required to delete.'
+      return
+    }
     await replayToServer([...operations, { op: 'delete', key: k }])
   }
 
@@ -543,20 +570,37 @@
         <div class="grid grid-cols-2 gap-2 sm:gap-3">
           <div class="flex min-w-0 flex-col gap-1">
             <label class="text-xs font-medium text-(--muted)" for="key">Key</label>
-            <input
-              class="w-full min-w-0 rounded-lg border bg-(--bg) px-3 py-2 text-sm text-(--text) outline-none focus:border-(--accent) {keyFieldError
-                ? 'border-(--bad)'
-                : 'border-(--border)'}"
-              id="key"
-              type="text"
-              bind:value={keyInput}
-              disabled={busy}
-              aria-invalid={keyFieldError ? 'true' : 'false'}
-              aria-describedby={keyFieldError ? 'key-field-error' : undefined}
-              oninput={() => {
-                keyFieldError = null
-              }}
-            />
+            <div class="relative">
+              <input
+                class="w-full min-w-0 rounded-lg border bg-(--bg) px-3 py-2 pr-9 text-sm text-(--text) outline-none focus:border-(--accent) {keyFieldError
+                  ? 'border-(--bad)'
+                  : 'border-(--border)'}"
+                id="key"
+                type="text"
+                bind:value={keyInput}
+                disabled={busy}
+                aria-invalid={keyFieldError ? 'true' : 'false'}
+                aria-describedby={keyFieldError ? 'key-field-error' : undefined}
+                oninput={() => {
+                  keyFieldError = null
+                }}
+              />
+              {#if keyInput.trim().length > 0}
+                <button
+                  type="button"
+                  class="absolute right-1 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full bg-transparent text-sm leading-none text-(--muted) hover:text-(--text) disabled:cursor-not-allowed disabled:opacity-50"
+                  onclick={() => {
+                    keyInput = ''
+                    keyFieldError = null
+                  }}
+                  disabled={busy}
+                  aria-label="Clear key input"
+                  title="Clear"
+                >
+                  ×
+                </button>
+              {/if}
+            </div>
             {#if keyFieldError}
               <p id="key-field-error" class="mt-0.5 text-xs leading-snug text-(--bad)" role="alert">
                 {keyFieldError}
@@ -565,21 +609,38 @@
           </div>
           <div class="flex min-w-0 flex-col gap-1">
             <label class="text-xs font-medium text-(--muted)" for="val">Value</label>
-            <input
-              class="w-full min-w-0 rounded-lg border bg-(--bg) px-3 py-2 text-sm text-(--text) outline-none focus:border-(--accent) {valueFieldError
-                ? 'border-(--bad)'
-                : 'border-(--border)'}"
-              id="val"
-              type="text"
-              bind:value={valueInput}
-              disabled={busy}
-              title="Used for Insert"
-              aria-invalid={valueFieldError ? 'true' : 'false'}
-              aria-describedby={valueFieldError ? 'value-field-error' : undefined}
-              oninput={() => {
-                valueFieldError = null
-              }}
-            />
+            <div class="relative">
+              <input
+                class="w-full min-w-0 rounded-lg border bg-(--bg) px-3 py-2 pr-9 text-sm text-(--text) outline-none focus:border-(--accent) {valueFieldError
+                  ? 'border-(--bad)'
+                  : 'border-(--border)'}"
+                id="val"
+                type="text"
+                bind:value={valueInput}
+                disabled={busy}
+                title="Used for Insert"
+                aria-invalid={valueFieldError ? 'true' : 'false'}
+                aria-describedby={valueFieldError ? 'value-field-error' : undefined}
+                oninput={() => {
+                  valueFieldError = null
+                }}
+              />
+              {#if String(valueInput ?? '').trim().length > 0}
+                <button
+                  type="button"
+                  class="absolute right-1 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full bg-transparent text-sm leading-none text-(--muted) hover:text-(--text) disabled:cursor-not-allowed disabled:opacity-50"
+                  onclick={() => {
+                    valueInput = ''
+                    valueFieldError = null
+                  }}
+                  disabled={busy}
+                  aria-label="Clear value input"
+                  title="Clear"
+                >
+                  ×
+                </button>
+              {/if}
+            </div>
             {#if valueFieldError}
               <p id="value-field-error" class="mt-0.5 text-xs leading-snug text-(--bad)" role="alert">
                 {valueFieldError}
@@ -660,45 +721,242 @@
     <section
       class="flex min-h-[280px] max-h-[70vh] min-w-0 flex-col overflow-hidden rounded-xl border border-(--border) bg-(--surface) p-4 md:h-full md:min-h-0"
     >
-      <div class="flex shrink-0 flex-wrap items-start justify-between gap-2">
-        <h2 class="text-base font-semibold">History</h2>
-        {#if steps.length >= 2}
-          <button
-            type="button"
-            class="shrink-0 rounded-lg border border-(--border) bg-(--surface) px-3 py-2 text-sm hover:border-(--accent) hover:bg-(--accent-dim) disabled:cursor-not-allowed disabled:opacity-50"
-            onclick={toggleTriePlay}
-            disabled={busy}
+      <div class="flex shrink-0">
+        <div class="flex w-full min-w-0 flex-1 items-center">
+          <nav
+            class="flex w-full min-w-0 rounded-lg border border-(--border) bg-(--bg) p-1"
+            aria-label="History panel tabs"
           >
-            {triePlaying ? 'Pause' : 'Play steps'}
-          </button>
-        {/if}
+            <button
+              type="button"
+              class={`min-w-0 flex-1 rounded-md px-2 py-1.5 text-sm font-medium transition-colors ${
+                historyPanelTab === 'history'
+                  ? 'bg-(--surface) text-(--text) shadow-sm'
+                  : 'text-(--muted) hover:bg-(--surface)'
+              }`}
+              onclick={() => {
+                stopVerifyPlay()
+                historyPanelTab = 'history'
+              }}
+              aria-current={historyPanelTab === 'history' ? 'page' : undefined}
+            >
+              History
+            </button>
+            <button
+              type="button"
+              class={`min-w-0 flex-1 rounded-md px-2 py-1.5 text-sm font-medium transition-colors ${
+                historyPanelTab === 'verification'
+                  ? 'bg-(--surface) text-(--text) shadow-sm'
+                  : 'text-(--muted) hover:bg-(--surface)'
+              }`}
+              onclick={() => {
+                stopTriePlay()
+                historyPanelTab = 'verification'
+              }}
+              aria-current={historyPanelTab === 'verification' ? 'page' : undefined}
+            >
+              Verification
+            </button>
+          </nav>
+        </div>
       </div>
-      <p class="mt-1 shrink-0 text-xs text-(--muted)">Click a step to show that trie state in the graph.</p>
-      {#if steps.length === 0}
-        <p class="mt-2 flex-1 text-sm text-(--muted) md:min-h-0">
-          No steps yet - run an operation or pick a database above.
-        </p>
+
+      {#if historyPanelTab === 'history'}
+        <div class="mt-2 flex shrink-0 flex-wrap items-center justify-between gap-2">
+          <p class="text-xs text-(--muted)">Click a step to show that trie state in the graph.</p>
+          {#if steps.length >= 2}
+            <button
+              type="button"
+              class="shrink-0 rounded-lg border border-(--border) bg-(--surface) px-3 py-2 text-sm hover:border-(--accent) hover:bg-(--accent-dim) disabled:cursor-not-allowed disabled:opacity-50"
+              onclick={toggleTriePlay}
+              disabled={busy}
+            >
+              {triePlaying ? 'Pause' : 'Play steps'}
+            </button>
+          {/if}
+        </div>
+        {#if steps.length === 0}
+          <p class="mt-2 flex-1 text-sm text-(--muted) md:min-h-0">
+            No steps yet - run an operation or pick a database above.
+          </p>
+        {:else}
+          <ul class="mt-2 flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto pr-1">
+            {#each steps as step, idx}
+              <li class="list-none">
+                <button
+                  type="button"
+                  class="w-full max-w-full rounded-lg border px-3 py-2 text-left text-sm transition-colors disabled:opacity-50 {stepIndex === idx
+                    ? 'border-(--accent) bg-(--accent-dim) text-(--text)'
+                    : 'border-(--border) bg-(--surface) text-(--muted) hover:border-(--accent) hover:bg-(--accent-dim)'}"
+                  onclick={() => goToTrieStep(idx)}
+                  disabled={busy}
+                  aria-pressed={stepIndex === idx}
+                >
+                  <span class="block font-medium text-(--text)">{step.label}</span>
+                  <span class="mt-0.5 block font-mono text-[10px] break-all text-(--muted)">
+                    state_root: {step.state_root_hex}
+                  </span>
+                </button>
+              </li>
+            {/each}
+          </ul>
+        {/if}
       {:else}
-        <ul class="mt-2 flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto pr-1">
-          {#each steps as step, idx}
-            <li class="list-none">
-              <button
-                type="button"
-                class="w-full max-w-full rounded-lg border px-3 py-2 text-left text-sm transition-colors disabled:opacity-50 {stepIndex === idx
-                  ? 'border-(--accent) bg-(--accent-dim) text-(--text)'
-                  : 'border-(--border) bg-(--surface) text-(--muted) hover:border-(--accent) hover:bg-(--accent-dim)'}"
-                onclick={() => goToTrieStep(idx)}
-                disabled={busy}
-                aria-pressed={stepIndex === idx}
-              >
-                <span class="block font-medium text-(--text)">{step.label}</span>
-                <span class="mt-0.5 block font-mono text-[10px] break-all text-(--muted)">
-                  state_root: {step.state_root_hex}
-                </span>
-              </button>
-            </li>
-          {/each}
-        </ul>
+        <p class="mt-2 shrink-0 text-xs text-(--muted) leading-snug">
+          Root = <code>keccak256(RLP(root_node))</code>. Build a proof for the key below, then step through
+          <code>verify_inclusion</code>.
+        </p>
+
+        <div class="mt-3 flex shrink-0 flex-col gap-2">
+          <label class="text-xs font-medium text-(--muted)" for="pk">Key to prove</label>
+          <div class="flex flex-wrap items-end gap-2">
+            <input
+              class="w-full min-w-0 flex-1 rounded-lg border border-(--border) bg-(--bg) px-3 py-2 text-sm text-(--text) outline-none focus:border-(--accent)"
+              id="pk"
+              type="text"
+              bind:value={proveKey}
+              disabled={busy}
+            />
+            <button
+              type="button"
+              class="rounded-lg border border-transparent bg-(--accent) px-3 py-2 text-sm font-semibold text-[#0f1219] hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+              onclick={runVerifyDemo}
+              disabled={busy || (!activeDb && operations.length === 0)}
+            >
+              Verify
+            </button>
+          </div>
+        </div>
+
+        <div class="mt-3 min-h-0 flex-1 overflow-y-auto pr-1">
+          {#if verifyResult}
+            <div class="rounded-lg border border-(--border) bg-(--bg) p-3">
+              <p class="font-mono text-[11px] break-all text-(--muted)">
+                state_root (keccak): <span class="break-all">{verifyResult.root_keccak_hex}</span>
+              </p>
+              <p class="mt-1 font-mono text-[11px] break-all text-(--muted)">
+                value for <code>{verifyResult.prove_key}</code>:
+                <span class="break-all">{verifyResult.value_utf8 ?? verifyResult.value_hex}</span>
+              </p>
+              <p class="mt-1 font-mono text-[11px] break-all text-(--muted)">
+                proof nodes: {verifyResult.proof_nodes_hex.length}
+              </p>
+              <p class={`mt-2 font-bold ${verifyResult.verified ? 'text-(--good)' : 'text-(--bad)'}`}>
+                Result: {verifyResult.verified ? 'VERIFIED' : 'FAILED'}
+              </p>
+            </div>
+
+            <div class="mt-3">
+              <div class="flex items-center justify-between gap-2">
+                <h3 class="text-sm font-semibold">Proof</h3>
+                <p class="text-xs text-(--muted)">
+                  {verifyResult.proof_nodes_hex.length} node{verifyResult.proof_nodes_hex.length === 1 ? '' : 's'}
+                </p>
+              </div>
+              <div class="mt-2 max-h-48 overflow-y-auto rounded-lg border border-(--border) bg-(--bg) p-2 pr-1">
+                {#each verifyResult.proof_nodes_hex as n, idx (idx)}
+                  <div class="flex gap-2 py-1">
+                    <span class="shrink-0 font-mono text-[11px] text-(--muted)">[{idx}]</span>
+                    <span class="min-w-0 font-mono text-[11px] break-all text-(--muted)">
+                      <ExpandableHex value={as0xHex(n)} className="text-(--muted)" first={16} last={12} />
+                    </span>
+                  </div>
+                  {#if idx !== verifyResult.proof_nodes_hex.length - 1}
+                    <div class="h-px bg-(--border) opacity-60"></div>
+                  {/if}
+                {/each}
+              </div>
+              <p class="mt-1 text-xs text-(--muted)">
+                Each entry is an RLP-encoded node (hex). Click to expand/collapse.
+              </p>
+            </div>
+
+            <div class="mt-3 flex min-h-0 flex-col">
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <h3 class="text-sm font-semibold">Steps</h3>
+                <div class="flex items-center gap-2">
+                  <button
+                    type="button"
+                    class="rounded-lg border border-(--border) bg-(--surface) px-3 py-2 text-sm hover:border-(--accent) hover:bg-(--accent-dim) disabled:cursor-not-allowed disabled:opacity-50"
+                    onclick={toggleVerifyPlay}
+                    disabled={verifyResult.verify_steps.length < 2}
+                  >
+                    {verifyPlaying ? 'Pause' : 'Play'}
+                  </button>
+                </div>
+              </div>
+
+              <div class="mt-2 max-h-76 min-h-0 overflow-y-auto pr-1" bind:this={verifyStepsScrollEl}>
+                {#each verifyResult.verify_steps as s, i}
+                  <button
+                    type="button"
+                    data-verify-step={i}
+                    class={`w-full rounded-lg border border-(--border) p-3 text-left opacity-60 transition-colors hover:border-(--accent) hover:bg-(--accent-dim) disabled:cursor-not-allowed disabled:opacity-50 ${
+                      i === verifyStepIndex ? 'opacity-100 border-(--accent) bg-(--accent-dim)' : ''
+                    } ${s.ok === true ? 'border-l-4 border-l-(--good)' : ''} ${
+                      s.ok === false ? 'border-l-4 border-l-(--bad)' : ''
+                    }`}
+                    aria-current={i === verifyStepIndex ? 'step' : undefined}
+                    onclick={() => {
+                      stopVerifyPlay()
+                      verifyStepIndex = i
+                    }}
+                  >
+                    <h4 class="text-sm font-semibold">{s.title}</h4>
+                    <p class="mt-1 text-sm text-(--muted)">{s.detail}</p>
+                    {#if Array.isArray(s.detail_hexes) && s.detail_hexes.length}
+                      <div class="mt-1 flex flex-col gap-1">
+                        {#each s.detail_hexes as hx, j (j)}
+                          <p class="font-mono text-[11px] break-all text-(--muted)">
+                            {hx.label}: <ExpandableHex value={as0xHex(hx.hex)} className="text-(--muted)" first={12} last={10} />
+                          </p>
+                        {/each}
+                      </div>
+                    {:else if s.key_path_nibbles_hex}
+                      <p class="mt-1 font-mono text-[11px] break-all text-(--muted)">
+                        path: <ExpandableHex value={as0xHex(s.key_path_nibbles_hex)} className="text-(--muted)" first={12} last={10} />
+                      </p>
+                    {/if}
+                    {#if s.hash_hex}
+                      <p class="mt-2 font-mono text-[11px] break-all text-(--muted)">
+                        hash: <ExpandableHex value={as0xHex(s.hash_hex)} className="text-(--muted)" />
+                      </p>
+                    {/if}
+                    {#if s.expected_state_root_hex}
+                      <p class="mt-2 font-mono text-[11px] break-all text-(--muted)">
+                        expected state_root:
+                        <ExpandableHex value={as0xHex(s.expected_state_root_hex)} className="text-(--muted)" />
+                      </p>
+                    {/if}
+                    {#if s.node_hash_hex}
+                      <p class="mt-2 font-mono text-[11px] break-all text-(--muted)">
+                        node hash: <ExpandableHex value={as0xHex(s.node_hash_hex)} className="text-(--muted)" />
+                      </p>
+                    {/if}
+                    {#if s.proof_index !== undefined}
+                      <p class="mt-2 font-mono text-[11px] break-all text-(--muted)">proof index: {s.proof_index}</p>
+                    {/if}
+                  </button>
+                  {#if i !== verifyResult.verify_steps.length - 1}
+                    <div class="h-2"></div>
+                  {/if}
+                {/each}
+              </div>
+            </div>
+          {:else if verifySectionError}
+            <div class="rounded-lg border border-(--border) bg-(--bg) p-3" role="alert">
+              <p class="font-mono text-[11px] break-all text-(--muted)">state_root (keccak): —</p>
+              <p class="mt-1 font-mono text-[11px] break-all text-(--muted)">
+                value for <code>{proveKey}</code>: —
+              </p>
+              <p class="mt-1 font-mono text-[11px] break-all text-(--muted)">proof nodes: —</p>
+              <p class="mt-2 font-bold text-(--bad)">Result: FAILED</p>
+              <p class="mt-2 text-sm text-(--bad)">{verifySectionError}</p>
+            </div>
+          {:else}
+            <p class="text-sm text-(--muted)">Run the walkthrough to see the computed root hash and proof steps.</p>
+          {/if}
+        </div>
       {/if}
     </section>
 
@@ -860,106 +1118,6 @@
       {/if}
     </section>
   </div>
-
-  <section class="mt-5 rounded-xl border border-(--border) bg-(--surface) p-4">
-    <h2 class="text-base font-semibold">Root hash &amp; inclusion proof</h2>
-    <p class="mt-1 text-sm text-(--muted)">
-      The state root is <code>keccak256(RLP(root_node))</code>. The walkthrough replays your history, builds a
-      proof for the key below, and steps through <code>verify_inclusion</code> (embedded vs hashed child refs).
-    </p>
-
-    <div class="mt-3 flex flex-wrap items-end gap-2">
-      <label class="block w-full text-xs font-medium text-(--muted)" for="pk">Key to prove</label>
-      <input
-        class="w-full max-w-64 rounded-lg border border-(--border) bg-(--bg) px-3 py-2 text-sm text-(--text) outline-none focus:border-(--accent)"
-        id="pk"
-        type="text"
-        bind:value={proveKey}
-        disabled={busy}
-      />
-      <button
-        type="button"
-        class="rounded-lg border border-transparent bg-(--accent) px-3 py-2 text-sm font-semibold text-[#0f1219] hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
-        onclick={runVerifyDemo}
-        disabled={busy || (!activeDb && operations.length === 0)}
-      >
-        Run verification walkthrough
-      </button>
-    </div>
-
-    {#if verifySectionError}
-      <p
-        class="mt-3 rounded-lg border border-(--bad) bg-(--surface) px-3 py-2 text-sm text-(--bad)"
-        role="alert"
-      >
-        {verifySectionError}
-      </p>
-    {/if}
-
-    {#if verifyResult}
-      <div class="mt-3 rounded-lg border border-(--border) bg-(--bg) p-3">
-        <p class="font-mono text-xs break-all text-(--muted)">
-          state_root (keccak): <span class="break-all">{verifyResult.root_keccak_hex}</span>
-        </p>
-        <p class="mt-1 font-mono text-xs break-all text-(--muted)">
-          root RLP (proof[0], hex): <span class="break-all">{verifyResult.root_rlp_hex}</span>
-        </p>
-        <p class="mt-1 font-mono text-xs break-all text-(--muted)">
-          value for <code>{verifyResult.prove_key}</code>: <span class="break-all">{verifyResult.value_hex}</span>
-        </p>
-        <p class="mt-1 font-mono text-xs break-all text-(--muted)">
-          proof nodes: {verifyResult.proof_nodes_hex.length}
-        </p>
-        <p class={`mt-2 font-bold ${verifyResult.verified ? 'text-(--good)' : 'text-(--bad)'}`}>
-          Result: {verifyResult.verified ? 'VERIFIED' : 'FAILED'}
-        </p>
-      </div>
-
-      <h3 class="mt-4 text-sm font-semibold">Verification steps</h3>
-      <div class="mt-2 flex flex-col gap-2">
-        <input
-          class="w-full max-w-[420px]"
-          type="range"
-          min="0"
-          max={verifyResult.verify_steps.length - 1}
-          bind:value={verifyStepIndex}
-          disabled={verifyResult.verify_steps.length < 2}
-        />
-        <button
-          type="button"
-          class="w-fit rounded-lg border border-(--border) bg-(--surface) px-3 py-2 text-sm hover:border-(--accent) hover:bg-(--accent-dim) disabled:cursor-not-allowed disabled:opacity-50"
-          onclick={toggleVerifyPlay}
-          disabled={verifyResult.verify_steps.length < 2}
-        >
-          {verifyPlaying ? 'Pause' : 'Play'}
-        </button>
-      </div>
-
-      {#each verifyResult.verify_steps as s, i}
-        <article
-          class={`my-2 rounded-lg border border-(--border) p-3 opacity-60 ${
-            i === verifyStepIndex ? 'opacity-100 border-(--accent) bg-(--accent-dim)' : ''
-          } ${s.ok === true ? 'border-l-4 border-l-(--good)' : ''} ${
-            s.ok === false ? 'border-l-4 border-l-(--bad)' : ''
-          }`}
-        >
-          <h4 class="text-sm font-semibold">{s.title}</h4>
-          <p class="mt-1 text-sm text-(--muted)">{s.detail}</p>
-          {#if s.hash_hex}
-            <p class="mt-2 font-mono text-[11px] break-all text-(--muted)">hash: {s.hash_hex}</p>
-          {/if}
-          {#if s.expected_state_root_hex}
-            <p class="mt-2 font-mono text-[11px] break-all text-(--muted)">
-              expected state_root: {s.expected_state_root_hex}
-            </p>
-          {/if}
-          {#if s.proof_index !== undefined}
-            <p class="mt-2 font-mono text-[11px] break-all text-(--muted)">proof index: {s.proof_index}</p>
-          {/if}
-        </article>
-      {/each}
-    {/if}
-  </section>
 </div>
 
 <style>

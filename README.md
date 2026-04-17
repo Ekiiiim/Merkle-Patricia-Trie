@@ -50,25 +50,3 @@ cd .. && python3 -m uvicorn api_server:app --host 127.0.0.1 --port 8000
 ```
 
 Then open `http://127.0.0.1:8000`.
-
-### Static hosting (GitHub Pages) + hosted API (Option 3)
-
-GitHub Pages can host the **static frontend** from `web/`, but the demo still needs a running API for `/api/*`.
-
-- **Frontend (GitHub Pages)**
-  - The repo includes a GitHub Actions workflow at `.github/workflows/deploy-gh-pages.yml` that builds `web/` and deploys `web/dist` to Pages.
-  - Set the API origin in GitHub:
-    - **Settings → Secrets and variables → Actions → Variables**
-    - Add `VITE_API_BASE` = `https://your-api.example.com`
-  - The deployed site will call `https://your-api.example.com/api/...` instead of `/api/...`.
-
-- **API (hosted elsewhere)**
-  - Ensure CORS allows requests from your Pages origin.
-  - Configure either:
-    - `MPT_CORS_ORIGINS="https://<user>.github.io"` (comma-separated list), or
-    - `MPT_CORS_ORIGIN_REGEX="^https://[^/]+\\.github\\.io$"` (regex)
-  - Then run the API with your host/port, for example:
-
-```bash
-python3 -m uvicorn api_server:app --host 0.0.0.0 --port 8000
-```

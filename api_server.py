@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 from typing import Literal, Optional
@@ -29,10 +30,27 @@ from mpt.store import load_trie_from_head
 
 app = FastAPI(title="MPT demo API", version="0.1.0")
 
+_default_cors_origins = [
+    "http://127.0.0.1:5173",
+    "http://localhost:5173",
+]
+
+# For GitHub Pages/static hosting, you will typically set one of these:
+# - MPT_CORS_ORIGINS="https://<user>.github.io,https://<org>.github.io"
+# - MPT_CORS_ORIGIN_REGEX="^https://[^/]+\\.github\\.io$" (or include "/<repo>" if desired)
+_cors_origins = [
+    o.strip()
+    for o in os.getenv("MPT_CORS_ORIGINS", "").split(",")
+    if o.strip()
+]
+_cors_origin_regex = os.getenv("MPT_CORS_ORIGIN_REGEX", "").strip() or None
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://127.0.0.1:5173", "http://localhost:5173"],
-    allow_credentials=True,
+    allow_origins=_cors_origins or _default_cors_origins,
+    allow_origin_regex=_cors_origin_regex,
+    # This demo API does not rely on cookies; keeping credentials off simplifies cross-origin hosting.
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )

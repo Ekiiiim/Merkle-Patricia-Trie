@@ -35,8 +35,9 @@ jobs:
         env:
           # Triggers the Vite `base` auto-detection in `web/vite.config.ts`
           GITHUB_PAGES: "true"
-          # Optionally set this to your deployed API origin, e.g. "https://your-api.example.com"
-          VITE_API_BASE: ""
+          # Set this in GitHub: Settings → Secrets and variables → Actions → Variables
+          # Example: https://your-api.example.com
+          VITE_API_BASE: ${{ vars.VITE_API_BASE }}
         run: npm run build
 
       - uses: actions/configure-pages@v5

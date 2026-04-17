@@ -79,7 +79,10 @@ class LookupRequest(BaseModel):
 
 
 class DbLoadRequest(BaseModel):
-    db_name: str = Field(..., description="Database file name under ./db (e.g. test_mpt.db)")
+    db_name: str = Field(
+        ...,
+        description="RocksDB directory name directly under ./db (e.g. test_mpt_rocks)",
+    )
 
 
 _DB_DIR = _ROOT / "db"
@@ -93,11 +96,16 @@ _active_steps: list[dict] = []
 
 
 def _list_db_names() -> list[str]:
-    return sorted(p.name for p in _DB_DIR.glob("*.db") if p.is_file())
+    """List immediate subdirectories of ./db (RocksDB stores), excluding hidden dot-prefixed names."""
+    return sorted(
+        p.name
+        for p in _DB_DIR.iterdir()
+        if p.is_dir() and not p.name.startswith(".")
+    )
 
 
 def _db_path_for(name: str) -> Path:
-    # Restrict to files under ./db to avoid path traversal.
+    # Restrict to one path segment directly under ./db (RocksDB directory name).
     if "/" in name or "\\" in name or name.startswith("."):
         raise HTTPException(status_code=400, detail="Invalid db_name")
     p = (_DB_DIR / name).resolve()
@@ -396,8 +404,8 @@ def verify_demo(body: VerifyDemoRequest) -> dict:
 @app.get("/api/db/list")
 def db_list() -> dict:
     """
-    List DB files, current session, and (when a DB is active) the operations + Graphviz
-    steps kept in memory so the SPA can rehydrate after a full page reload.
+    List RocksDB directories under ./db, current session, and (when a DB is active) the
+    operations + Graphviz steps kept in memory so the SPA can rehydrate after a full page reload.
     """
     with _state_lock:
         active = _active_db_name
@@ -409,7 +417,7 @@ def db_list() -> dict:
     if active is None:
         return out
 
-    # Rare: active DB but steps lost — rebuild step 0 from the DB file.
+    # Rare: active DB but steps lost — rebuild step 0 from the RocksDB directory.
     if not steps:
         p = _db_path_for(active)
         with PersistentMPT(str(p), create_if_missing=False) as pmpt:
@@ -434,10 +442,10 @@ def db_list() -> dict:
 
 @app.post("/api/db/load")
 def db_load(body: DbLoadRequest) -> dict:
-    """Load an existing DB under ./db; subsequent operations are committed to it."""
+    """Load an existing RocksDB store under ./db/<name>; subsequent operations are committed to it."""
     p = _db_path_for(body.db_name)
-    if not p.exists():
-        raise HTTPException(status_code=404, detail=f"DB not found: {body.db_name}")
+    if not p.is_dir():
+        raise HTTPException(status_code=404, detail=f"DB directory not found: {body.db_name}")
 
     with PersistentMPT(str(p), create_if_missing=False) as pmpt:
         # Initialize step 0 from current DB head.

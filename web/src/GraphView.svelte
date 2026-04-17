@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { createEventDispatcher, onDestroy, onMount } from 'svelte'
+  import { onDestroy, onMount } from 'svelte'
   import cytoscape, { type Core } from 'cytoscape'
   import dagre from 'dagre'
   import cytoscapeDagre from 'cytoscape-dagre'
@@ -8,14 +8,20 @@
 
   type TrieGraph = { nodes: any[]; edges: any[] }
 
-  const { graph, highlightPath = [], highlightCurrent = null, selectedId = null } = $props<{
+  const {
+    graph,
+    highlightPath = [],
+    highlightCurrent = null,
+    selectedId = null,
+    onNodeClick,
+  } = $props<{
     graph: TrieGraph
     highlightPath?: string[]
     highlightCurrent?: string | null
     selectedId?: string | null
+    /** Called when the user taps a trie node (replaces legacy `on:nodeclick`). */
+    onNodeClick?: (nodeData: Record<string, unknown>) => void
   }>()
-
-  const dispatch = createEventDispatcher<{ nodeclick: any }>()
 
   let el: HTMLDivElement | null = null
   let cy: Core | null = null
@@ -212,7 +218,7 @@
     cy.on('tap', 'node', (evt) => {
       selectedNodeId = evt.target.id()
       applyHighlights()
-      dispatch('nodeclick', evt.target.data())
+      onNodeClick?.(evt.target.data() as Record<string, unknown>)
     })
 
     // Populate immediately (effects may have run before `cy` existed).

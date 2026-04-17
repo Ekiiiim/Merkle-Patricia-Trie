@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 from typing import Literal, Optional
@@ -76,6 +77,21 @@ _state_lock = threading.Lock()
 _active_db_name: Optional[str] = None
 _active_ops: list[TrieOp] = []
 _active_steps: list[dict] = []
+
+# Set MPT_PUBLIC_DEMO=true on hosted demos (e.g. Render) to disable on-disk DB load/list and strip any DB session.
+_PUBLIC_DEMO = os.environ.get("MPT_PUBLIC_DEMO", "").strip().lower() in ("1", "true", "yes")
+
+
+def _strip_persistent_session_if_public_demo() -> None:
+    """Drop any RocksDB-backed session so the instance only serves in-memory replay."""
+    if not _PUBLIC_DEMO:
+        return
+    with _state_lock:
+        global _active_db_name, _active_ops, _active_steps
+        if _active_db_name is not None:
+            _active_db_name = None
+            _active_ops = []
+            _active_steps = []
 
 
 def _list_db_names() -> list[str]:
@@ -151,6 +167,7 @@ def _lookup_response(
 @app.post("/api/lookup")
 def lookup_value(body: LookupRequest) -> dict:
     """Return the value for a key after applying ``operations`` (read-only; does not commit)."""
+    _strip_persistent_session_if_public_demo()
     key_b = body.key.encode("utf-8")
     with _state_lock:
         db_name = _active_db_name
@@ -192,6 +209,7 @@ def replay(body: ReplayRequest) -> dict:
     If a DB is loaded: apply operations incrementally to the loaded SQLite DB, and
     return (cached) Graphviz steps for this DB session.
     """
+    _strip_persistent_session_if_public_demo()
     with _state_lock:
         db_name = _active_db_name
         if db_name is None:
@@ -285,6 +303,7 @@ def verify_demo(body: VerifyDemoRequest) -> dict:
     If DB loaded: ensure operations extend current history, apply delta to DB, then prove
     against the current DB head.
     """
+    _strip_persistent_session_if_public_demo()
     with _state_lock:
         db_name = _active_db_name
         ops_prefix = list(_active_ops)
@@ -390,12 +409,17 @@ def db_list() -> dict:
     List RocksDB directories under ./db, current session, and (when a DB is active) the
     operations + Graphviz steps kept in memory so the SPA can rehydrate after a full page reload.
     """
+    _strip_persistent_session_if_public_demo()
     with _state_lock:
         active = _active_db_name
         ops = list(_active_ops)
         steps = list(_active_steps)
 
-    out: dict[str, object] = {"dbs": _list_db_names(), "active_db": active}
+    out: dict[str, object] = {
+        "dbs": [] if _PUBLIC_DEMO else _list_db_names(),
+        "active_db": active,
+        "public_demo": _PUBLIC_DEMO,
+    }
 
     if active is None:
         return out
@@ -426,6 +450,11 @@ def db_list() -> dict:
 @app.post("/api/db/load")
 def db_load(body: DbLoadRequest) -> dict:
     """Load an existing RocksDB store under ./db/<name>; subsequent operations are committed to it."""
+    if _PUBLIC_DEMO:
+        raise HTTPException(
+            status_code=403,
+            detail="Persistent databases are disabled on the public demo.",
+        )
     p = _db_path_for(body.db_name)
     if not p.is_dir():
         raise HTTPException(status_code=404, detail=f"DB directory not found: {body.db_name}")

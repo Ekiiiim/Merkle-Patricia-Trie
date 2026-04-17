@@ -40,6 +40,7 @@ This repo includes `render.yaml` (a Render Blueprint).
 - **Deploy**
   - Create a new Render service from this repo (Blueprint).
   - Render will run the build that installs Python deps, builds the frontend, then starts `uvicorn`.
+  - The blueprint sets **`MPT_PUBLIC_DEMO=true`**: the hosted app only uses an in-memory trie (no loading server `./db` stores; `/api/db/load` returns 403).
 
 - **Local prod-like run**
 

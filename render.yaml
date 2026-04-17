@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: mpt-demo
+    name: merkle-patricia-trie
     runtime: python
     plan: free
     buildCommand: |
@@ -16,3 +16,5 @@ services:
         value: "3.11.9"
       - key: NODE_VERSION
         value: "20"
+      - key: MPT_PUBLIC_DEMO
+        value: "true"

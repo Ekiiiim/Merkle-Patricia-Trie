@@ -754,17 +754,19 @@ class MerklePatriciaTrie:
         return True
 
     def prove(self, key: bytes) -> Optional[tuple[bytes, list[bytes]]]:
-        """Generates a Merkle proof for a given key.
+        """Generates an Ethereum-style Merkle Patricia inclusion proof for ``key``.
 
-        The proof is a list of RLP-encoded nodes encountered on the path 
-        from the root to the target leaf.
+        ``proof_nodes`` is ordered root-to-leaf. Each entry is the full **RLP** serialization
+        of one branch, extension, or leaf on the path for ``keccak256(key)`` (in nibbles).
+        Per the Yellow Paper embedding rule, a child whose reference is shorter than 32 bytes
+        is carried inside its parent's RLP and is **not** appended again as its own proof
+        element—only hashed-out-of-band children appear as separate blobs.
 
         Args:
             key: The raw byte key to prove.
 
         Returns:
-            A tuple containing 
-                (value, proof_nodes) if the key exists; None otherwise.
+            ``(value, proof_nodes)`` if the key exists; ``None`` otherwise.
         """
         acc: list[bytes] = []
         v = _prove_walk(self.root, _key_to_path(key), acc, db=self.db)

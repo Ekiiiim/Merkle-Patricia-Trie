@@ -9,7 +9,7 @@ from typing import Optional, Type, Union
 
 from mpt.constants import EMPTY_TRIE_ROOT
 from mpt.nodes import HashNode
-from mpt.storage.sqlite import SQLiteKVStore
+from mpt.storage.rocks import RocksKVStore
 from mpt.store import (
     MPT_HEAD_KEY, 
     TrieKVStore, 
@@ -43,7 +43,8 @@ class PersistentMPT:
         
         # Our Level DB.
         
-        self._kv = SQLiteKVStore(db_path, create_if_missing=create_if_missing, enable_buffer=True)
+        # self._kv = SQLiteKVStore(db_path, create_if_missing=create_if_missing, enable_buffer=True)
+        self._kv = RocksKVStore(db_path, create_if_missing=create_if_missing, enable_buffer=True)
         
         # Get the head hash of MPT.
         head_hash = self._kv.get(MPT_HEAD_KEY)

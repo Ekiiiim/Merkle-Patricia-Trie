@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Compare inclusion proof payload sizes: Ethereum-style MPT vs sorted-leaf binary Merkle tree.
+Compare inclusion proof payload sizes: Ethereum-style MPT vs plain binary Merkle tree.
 
 Run from repository root::
 
@@ -14,8 +14,9 @@ leaf) on the path from the state root to the leaf for ``keccak256(key)``; nodes 
 their own element. The implementation exposes the same list via ``MerklePatriciaTrie.prove``;
 verifiers walk it root-first together with the state root.
 
-**Plain Merkle proof size** is the length of ``SortedLeafBinaryMerkleTree.membership_proof_bytes``:
-the leaf commitment plus each 32-byte sibling hash on the sorted-leaf binary tree path.
+**Plain Merkle proof size** is the length of ``PlainBinaryMerkleTree.membership_proof_bytes``:
+the leaf commitment plus each 32-byte sibling hash on the binary Merkle path (leaves in
+**input order**, padded to the next power of two).
 """
 
 from __future__ import annotations
@@ -33,7 +34,7 @@ for _p in (_ROOT, _BENCH):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
-from plain_merkle import SortedLeafBinaryMerkleTree
+from plain_merkle import PlainBinaryMerkleTree
 from mpt.trie import MerklePatriciaTrie
 
 
@@ -49,6 +50,11 @@ def _random_pairs(n: int, seed: int) -> list[tuple[bytes, bytes]]:
         v = f"v{rng.randint(0, 10**6)}".encode()
         out.append((k, v))
     return out
+
+
+def synthetic_key_value_pairs(n: int, seed: int) -> list[tuple[bytes, bytes]]:
+    """Deterministic synthetic distinct keys (same distribution as this benchmark)."""
+    return _random_pairs(n, seed)
 
 
 def _mpt_proof_bytes(trie: MerklePatriciaTrie, key: bytes) -> int:
@@ -74,7 +80,7 @@ def collect_proof_sizes(
     for k, v in pairs:
         trie.insert(k, v)
 
-    mt = SortedLeafBinaryMerkleTree(pairs)
+    mt = PlainBinaryMerkleTree(pairs)
 
     mpt_sizes: list[int] = []
     plain_sizes: list[int] = []

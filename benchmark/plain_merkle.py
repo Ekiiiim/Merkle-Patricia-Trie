@@ -1,4 +1,4 @@
-"""Minimal sorted-leaf binary Merkle tree (Keccak-256) for proof-size comparison."""
+"""Minimal plain (insertion-order) binary Merkle tree (Keccak-256) for benchmarks."""
 
 from __future__ import annotations
 
@@ -26,11 +26,12 @@ def _padding_leaf(slot: int) -> bytes:
     return keccak256(b"\xffpad\x00" + slot.to_bytes(8, "big"))
 
 
-class SortedLeafBinaryMerkleTree:
+class PlainBinaryMerkleTree:
     """
     Complete binary tree over ``next_pow2(n)`` leaves.
 
-    * Real leaves: ``keccak256(b'\\x00leaf\\x00' + key + b'\\x00' + value)`` in **key-sorted** order.
+    * Real leaves: ``keccak256(b'\\x00leaf\\x00' + key + b'\\x00' + value)`` in **input order**
+      (order of first appearance of each key in the constructor list; later values overwrite).
     * Padding leaves: deterministic dummy hashes so ``n`` need not be a power of two.
     """
 
@@ -39,10 +40,13 @@ class SortedLeafBinaryMerkleTree:
     def __init__(self, pairs: list[tuple[bytes, bytes]]) -> None:
         if not pairs:
             raise ValueError("need at least one (key, value) pair")
-        uniq: dict[bytes, bytes] = {}
+        last: dict[bytes, bytes] = {}
+        order: list[bytes] = []
         for k, v in pairs:
-            uniq[k] = v
-        self.pairs = sorted(uniq.items(), key=lambda kv: kv[0])
+            if k not in last:
+                order.append(k)
+            last[k] = v
+        self.pairs = [(k, last[k]) for k in order]
         leaf_hashes = [_leaf_hash(k, v) for k, v in self.pairs]
         self.leaf_index: dict[bytes, int] = {k: i for i, (k, _) in enumerate(self.pairs)}
         cap = _next_pow2(len(leaf_hashes))
@@ -62,12 +66,30 @@ class SortedLeafBinaryMerkleTree:
     def root(self) -> bytes:
         return self.layers[-1][0]
 
+    def lookup(self, key: bytes) -> bytes:
+        """Return the stored value for ``key`` (O(1) via ``leaf_index`` + leaf list)."""
+        if key not in self.leaf_index:
+            raise KeyError(key)
+        return self.pairs[self.leaf_index[key]][1]
+
+    def lookup_without_leaf_index(self, key: bytes) -> bytes:
+        """
+        Find ``key`` by scanning the ordered leaf preimage list only (no ``leaf_index``).
+
+        Models retrieval when you commit to leaves with a Merkle root but do not keep a
+        key→position map: worst-case O(number of real leaves) string compares per query.
+        """
+        for k, v in self.pairs:
+            if k == key:
+                return v
+        raise KeyError(key)
+
     def membership_proof_bytes(self, key: bytes) -> tuple[bytes, int]:
         """
         Return (concatenated proof bytes, number of hashes).
 
-        Proof = leaf hash + each sibling along the path to the root (Ethereum-style
-        audit path; verifier is assumed to know root and key ordering rule).
+        Proof = leaf hash + each sibling along the path to the root (standard binary
+        Merkle audit path; verifier is assumed to know root and leaf ordering).
         """
         if key not in self.leaf_index:
             raise KeyError(key)

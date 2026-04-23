@@ -4,9 +4,8 @@ Incremental insert benchmark: MPT vs a naive plain Merkle baseline.
 
 **MPT curve:** wall time to insert ``n`` keys from scratch (one ``insert`` per key).
 
-**Plain curve:** cumulative wall time if, after each new key, the whole
-``PlainBinaryMerkleTree`` is rebuilt from all keys so far (no incremental
-structure—typical cost when you only keep a static Merkle snapshot API).
+**Plain curve:** wall time to insert ``n`` keys from scratch using
+``PlainBinaryMerkleTree.insert`` (incremental O(log n) updates, occasional rebuild when capacity grows).
 
 Requires matplotlib (``pip install -e ".[dev]"`` or ``pip install matplotlib``).
 
@@ -60,15 +59,12 @@ def _time_mpt_n_inserts(pairs: list[tuple[bytes, bytes]]) -> float:
 
 
 def _time_plain_rebuild_after_each_insert(pairs: list[tuple[bytes, bytes]]) -> float:
-    """Sum of full tree rebuild times after each successive key (1..len(pairs))."""
-    acc: list[tuple[bytes, bytes]] = []
-    total = 0.0
-    for kv in pairs:
-        acc.append(kv)
-        t0 = perf_counter()
-        _ = PlainBinaryMerkleTree(acc)
-        total += perf_counter() - t0
-    return total
+    """Time to insert all keys into one incrementally updated plain Merkle tree."""
+    t0 = perf_counter()
+    mt = PlainBinaryMerkleTree([pairs[0]])
+    for k, v in pairs[1:]:
+        mt.insert(k, v)
+    return perf_counter() - t0
 
 
 def _measure_curves(
@@ -153,7 +149,7 @@ def main() -> None:
     ax.set_ylabel("Time cost (seconds)")
     ax.set_title(
         "Incremental updates: total time to reach n keys (lower is better)\n"
-        "Plain: rebuilds after each insertion"
+        "Plain: incremental insert() updates"
     )
     ax.legend(loc="upper left")
     ax.set_xscale("log", base=2)

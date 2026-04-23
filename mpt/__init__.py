@@ -17,7 +17,6 @@ from mpt.interfaces import TrieKVStore
 from mpt.nibbles import common_prefix_length, key_to_nibbles, nibbles_to_bytes
 from mpt.nodes import Branch, Extension, Leaf
 from mpt.proof import verify_inclusion, verify_inclusion_trace
-from mpt.persistent import PersistentMPT, open_persistent
 from mpt.storage.memory import MemoryKVStore
 from mpt.storage.sqlite import SQLiteKVStore
 from mpt.store import (
@@ -30,6 +29,12 @@ from mpt.store import (
 from mpt.trie import MerklePatriciaTrie, snapshot_node
 from mpt.visualize import evolution_to_dot, trie_to_dot, trie_to_graph, try_matplotlib_show
 
+try:
+    from mpt.persistent import PersistentMPT, open_persistent
+except ModuleNotFoundError:
+    PersistentMPT = None  # type: ignore[assignment]
+    open_persistent = None  # type: ignore[assignment]
+
 __all__ = [
     "Branch",
     "EMPTY_TRIE_ROOT",
@@ -38,7 +43,6 @@ __all__ = [
     "MPT_HEAD_KEY",
     "MemoryKVStore",
     "MerklePatriciaTrie",
-    "PersistentMPT",
     "SQLiteKVStore",
     "TrieKVStore",
     "common_prefix_length",
@@ -58,7 +62,6 @@ __all__ = [
     "nibbles_to_bytes",
     "node_hash",
     "path_encoding",
-    "open_persistent",
     "persist_trie",
     "rlp_encode_node",
     "snapshot_node",
@@ -69,3 +72,8 @@ __all__ = [
     "verify_inclusion",
     "verify_inclusion_trace",
 ]
+
+if PersistentMPT is not None:
+    __all__.append("PersistentMPT")
+if open_persistent is not None:
+    __all__.append("open_persistent")

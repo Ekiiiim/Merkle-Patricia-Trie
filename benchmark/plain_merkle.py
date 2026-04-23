@@ -50,9 +50,10 @@ class PlainBinaryMerkleTree:
         leaf_hashes = [_leaf_hash(k, v) for k, v in self.pairs]
         self.leaf_index: dict[bytes, int] = {k: i for i, (k, _) in enumerate(self.pairs)}
         cap = _next_pow2(len(leaf_hashes))
-        pad_n = cap - len(leaf_hashes)
-        for j in range(pad_n):
-            leaf_hashes.append(_padding_leaf(j))
+        # Padding leaves are deterministic by absolute leaf slot, so incremental inserts can
+        # replace the next padding slot without shifting the rest.
+        for slot in range(len(leaf_hashes), cap):
+            leaf_hashes.append(_padding_leaf(slot))
         self.layers: list[list[bytes]] = [leaf_hashes]
         cur = leaf_hashes
         while len(cur) > 1:
@@ -103,3 +104,55 @@ class PlainBinaryMerkleTree:
             i //= 2
         blob = b"".join(parts)
         return blob, len(parts)
+
+    def insert(self, key: bytes, value: bytes) -> None:
+        """
+        Insert or update ``(key, value)`` and update Merkle layers incrementally.
+
+        - Update existing key: O(log n) hash recomputation up the tree.
+        - Insert new key into next available leaf slot: O(log n) if capacity allows,
+          else rebuild to next power-of-two capacity (O(n)).
+        """
+        if key in self.leaf_index:
+            idx = self.leaf_index[key]
+            self.pairs[idx] = (key, value)
+            self.layers[0][idx] = _leaf_hash(key, value)
+            self._rehash_path_from_leaf(idx)
+            return
+
+        idx = len(self.pairs)
+        self.pairs.append((key, value))
+        self.leaf_index[key] = idx
+
+        if idx >= len(self.layers[0]):
+            self._rebuild_layers()
+            return
+
+        self.layers[0][idx] = _leaf_hash(key, value)
+        self._rehash_path_from_leaf(idx)
+
+    def _rehash_path_from_leaf(self, leaf_idx: int) -> None:
+        i = leaf_idx
+        for level in range(len(self.layers) - 1):
+            parent = i // 2
+            layer = self.layers[level]
+            left = layer[2 * parent]
+            right = layer[2 * parent + 1]
+            self.layers[level + 1][parent] = keccak256(left + right)
+            i = parent
+
+    def _rebuild_layers(self) -> None:
+        leaf_hashes = [_leaf_hash(k, v) for k, v in self.pairs]
+        self.leaf_index = {k: i for i, (k, _) in enumerate(self.pairs)}
+        cap = _next_pow2(len(leaf_hashes))
+        for slot in range(len(leaf_hashes), cap):
+            leaf_hashes.append(_padding_leaf(slot))
+        layers: list[list[bytes]] = [leaf_hashes]
+        cur = leaf_hashes
+        while len(cur) > 1:
+            nxt: list[bytes] = []
+            for i in range(0, len(cur), 2):
+                nxt.append(keccak256(cur[i] + cur[i + 1]))
+            layers.append(nxt)
+            cur = nxt
+        self.layers = layers

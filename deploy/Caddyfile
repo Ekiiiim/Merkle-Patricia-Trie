@@ -1,0 +1,19 @@
+# Internal front door for the MPT demo. TLS is handled by the shared proxy.
+
+:80 {
+	encode gzip
+
+	handle /api/* {
+		# Operation lists are small JSON bodies; reject anything absurdly large.
+		request_body {
+			max_size 1MB
+		}
+		reverse_proxy mpt-api:8000
+	}
+
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+}

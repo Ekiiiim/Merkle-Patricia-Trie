@@ -1,0 +1,43 @@
+name: mpt
+
+# Merkle Patricia Trie demo: FastAPI backend + static Svelte client served by Caddy.
+# Only mpt-web joins the shared "web" network; the shared proxy routes mpt.minyu.me to it.
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  mpt-api:
+    build:
+      context: .
+      target: api
+    image: mpt-api
+    restart: unless-stopped
+    environment:
+      # Public instance: disable loading/committing the on-disk RocksDB stores under ./db.
+      MPT_PUBLIC_DEMO: "true"
+    # Replaying a very long operation list is memory hungry; keep it from starving other sites.
+    mem_limit: 512m
+    expose:
+      - "8000"
+    logging: *logging
+
+  mpt-web:
+    build:
+      context: .
+      target: web
+    image: mpt-web
+    restart: unless-stopped
+    depends_on:
+      - mpt-api
+    networks:
+      - default
+      - web
+    logging: *logging
+
+networks:
+  web:
+    external: true
